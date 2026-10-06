@@ -8,7 +8,7 @@ def conectar_db(db_name):
     return create_engine(f"sqlite:///{db_name}.db")
 
 # Configuración de la página (DEBE SER LO PRIMERO)
-st.set_page_config(page_title="Sistema de Revisión de Pagos", page_icon="💳", layout="wide")
+st.set_page_config(page_title="Sistema de Revisión de Pagos", layout="wide")
 
 # --- CREDENCIALES DE ACCESO ---
 USUARIOS_PERMITIDOS = {
