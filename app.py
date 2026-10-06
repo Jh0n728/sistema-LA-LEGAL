@@ -188,7 +188,7 @@ with st.container():
         st.error(f"Error al realizar la lectura en MySQL: {e}")
 
 # --- SECCIÓN: ACTUALIZAR REGISTROS DIARIOS EN LA BARRA LATERAL ---
-with st.sidebar.expander("⚙️ Administración / Cargar Datos"):
+with st.sidebar.expander("Cargar Datos"):
     st.markdown("### Actualizar Registros")
     
     # Selector para elegir a qué base de datos impactar
