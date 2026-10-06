@@ -2,6 +2,11 @@ import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine
 
+# Función de conexión a SQLite
+@st.cache_resource
+def conectar_db(db_name):
+    return create_engine(f"sqlite:///{db_name}.db")
+
 # Configuración de la página (DEBE SER LO PRIMERO)
 st.set_page_config(page_title="Sistema de Revisión de Pagos", page_icon="💳", layout="wide")
 
