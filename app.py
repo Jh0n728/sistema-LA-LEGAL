@@ -113,7 +113,6 @@ if busqueda.strip():
     palabras = busqueda.strip().split()
     condiciones_palabras = []
     for p in palabras:
-        # CAMBIO: Usamos ? en lugar de %s para SQLite
         condiciones_palabras.append("(nombre LIKE ? OR nro_deposito LIKE ?)")
         params.extend([f"%{p}%", f"%{p}%"])
     where_clauses.append("(" + " AND ".join(condiciones_palabras) + ")")
