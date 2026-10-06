@@ -63,7 +63,7 @@ if st.sidebar.button("Cerrar Sesión"):
     st.session_state.usuario = ""
     st.rerun()
 # --- SECCIÓN: ACTUALIZAR REGISTROS DIARIOS ---
-st.markdown("---")
+st.sidebar.markdown("---")
 st.subheader("Actualizar Registros Diarios")
 
 # Selector para elegir a qué base de datos impactar (sin la extensión .db para que coincida con tu selectbox principal)
