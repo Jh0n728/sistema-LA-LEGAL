@@ -56,45 +56,6 @@ cuenta_seleccionada = st.sidebar.selectbox(
     "Seleccione la Cuenta a Revisar:",
     ["db_cuenta_33", "db_cuenta_14"]
 )
-# --- SECCIÓN: ACTUALIZAR REGISTROS DIARIOS ---
-st.sidebar.markdown("---")
-st.subheader("Actualizar Registros Diarios")
-
-# Selector para elegir a qué base de datos impactar (sin la extensión .db para que coincida con tu selectbox principal)
-db_para_actualizar = st.selectbox(
-    "Seleccione la Base de Datos a Actualizar",
-    ["db_cuenta_33", "db_cuenta_14"]
-)
-
-# Subir archivo Excel o CSV con los nuevos depósitos
-archivo_subido = st.file_uploader(
-    "Subir archivo de nuevos depósitos (Excel/CSV)", type=["xlsx", "csv"]
-)
-
-if archivo_subido is not None:
-    # Leer el archivo dependiendo de su extensión
-    try:
-        if archivo_subido.name.endswith(".csv"):
-            df_nuevos = pd.read_csv(archivo_subido)
-        else:
-            df_nuevos = pd.read_excel(archivo_subido)
-        
-        st.write("Vista previa de los nuevos datos a insertar:")
-        st.dataframe(df_nuevos.head())
-
-        if st.button("Confirmar e Insertar en la Base de Datos"):
-            try:
-                # Usamos tu propia función conectar_db ya definida en el sistema
-                engine_actualizacion = conectar_db(db_para_actualizar)
-                
-                # Inserta los datos al final de la tabla 'pagos'
-                df_nuevos.to_sql("pagos", con=engine_actualizacion, if_exists="append", index=False)
-                
-                st.success(f"¡Se han agregado {len(df_nuevos)} registros nuevos a {db_para_actualizar} correctamente!")
-            except Exception as e:
-                st.error(f"Ocurrió un error al insertar los datos. Revisa que las columnas coincidan con la base de datos. Detalle: {e}")
-    except Exception as e:
-        st.error(f"Error al leer el archivo subido: {e}")
 
 st.sidebar.markdown("---")
 if st.sidebar.button("Cerrar Sesión"):
@@ -226,6 +187,46 @@ with st.container():
     except Exception as e:
         st.error(f"Error al realizar la lectura en MySQL: {e}")
 
+# --- SECCIÓN: ACTUALIZAR REGISTROS DIARIOS EN LA BARRA LATERAL ---
+with st.sidebar.expander("⚙️ Administración / Cargar Datos"):
+    st.markdown("### Actualizar Registros")
+    
+    # Selector para elegir a qué base de datos impactar
+    db_para_actualizar = st.selectbox(
+        "Base de datos a actualizar",
+        ["db_cuenta_33", "db_cuenta_14"],
+        key="select_db_admin"
+    )
 
+    # Subir archivo Excel o CSV con los nuevos depósitos
+    archivo_subido = st.file_uploader(
+        "Subir nuevos depósitos (Excel/CSV)", 
+        type=["xlsx", "csv"],
+        key="uploader_admin"
+    )
+
+    if archivo_subido is not None:
+        try:
+            if archivo_subido.name.endswith(".csv"):
+                df_nuevos = pd.read_csv(archivo_subido)
+            else:
+                df_nuevos = pd.read_excel(archivo_subido)
+            
+            st.write("Vista previa:")
+            st.dataframe(df_nuevos.head(3))
+
+            if st.button("Confirmar e Insertar", key="btn_confirmar_admin"):
+                try:
+                    # Usamos tu propia función conectar_db ya definida en el sistema
+                    engine_actualizacion = conectar_db(db_para_actualizar)
+                    
+                    # Inserta los datos al final de la tabla 'pagos'
+                    df_nuevos.to_sql("pagos", con=engine_actualizacion, if_exists="append", index=False)
+                    
+                    st.success(f"¡{len(df_nuevos)} registros agregados a {db_para_actualizar}!")
+                except Exception as e:
+                    st.error(f"Error al insertar. Revisa las columnas. Detalle: {e}")
+        except Exception as e:
+            st.error(f"Error al leer el archivo: {e}")
 
 
