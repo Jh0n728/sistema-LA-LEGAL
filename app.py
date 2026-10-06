@@ -213,7 +213,7 @@ with st.sidebar.expander("Cargar Datos"):
                 df_nuevos = pd.read_excel(archivo_subido)
             
             st.write("Vista previa:")
-            st.dataframe(df_nuevos.head(3))
+            st.dataframe(df_nuevos, use_container_width=True)
 
             if st.button("Confirmar e Insertar", key="btn_confirmar_admin"):
                 try:
