@@ -108,13 +108,15 @@ st.markdown("---")
 where_clauses = []
 params = []
 
+
 # Filtro por cuadro de búsqueda principal
 if busqueda.strip():
     palabras = busqueda.strip().split()
     condiciones_palabras = []
     for p in palabras:
-        condiciones_palabras.append("(nombre LIKE ? OR nro_deposito LIKE ?)")
-        params.extend([f"%{p}%", f"%{p}%"])
+        # Añadimos OR participante LIKE ? para que busque también en esa columna
+        condiciones_palabras.append("(nombre LIKE ? OR nro_deposito LIKE ? OR participante LIKE ?)")
+        params.extend([f"%{p}%", f"%{p}%", f"%{p}%"])
     where_clauses.append("(" + " AND ".join(condiciones_palabras) + ")")
 
 # Lógica del filtro para aislar depósitos sin Hoja de Ruta
