@@ -113,7 +113,8 @@ if busqueda.strip():
     palabras = busqueda.strip().split()
     condiciones_palabras = []
     for p in palabras:
-        condiciones_palabras.append("(nombre LIKE %s OR nro_deposito LIKE %s)")
+        # CAMBIO: Usamos ? en lugar de %s para SQLite
+        condiciones_palabras.append("(nombre LIKE ? OR nro_deposito LIKE ?)")
         params.extend([f"%{p}%", f"%{p}%"])
     where_clauses.append("(" + " AND ".join(condiciones_palabras) + ")")
 
@@ -123,13 +124,15 @@ if solo_sin_hoja:
 
 # Filtro por monto exacto
 if filtrar_monto and monto_buscado > 0:
-    where_clauses.append("monto = %s")
+    # CAMBIO: Usamos ? en lugar de %s
+    where_clauses.append("monto = ?")
     params.append(monto_buscado)
 
 # Filtro por rango de fechas
 if filtrar_fecha:
-    where_clauses.append("fecha BETWEEN %s AND %s")
-    params.extend([fecha_inicio, fecha_fin])
+    # CAMBIO: Usamos ? en lugar de %s
+    where_clauses.append("fecha BETWEEN ? AND ?")
+    params.extend([str(fecha_inicio), str(fecha_fin)])
 
 where_sql = ""
 if where_clauses:
@@ -138,7 +141,6 @@ if where_clauses:
 # Consultas preparadas
 query_total = f"SELECT SUM(monto) as total_monto, COUNT(*) as total_registros FROM pagos" + where_sql
 query_tabla = f"SELECT fecha, nro_deposito, nombre, participante, monto, hoja_de_ruta, programa_descripcion, mes_declaracion, obs FROM pagos" + where_sql + " LIMIT 500"
-
 # --- BLOQUE FIJO DE RENDERIZADO ---
 with st.container():
     try:
