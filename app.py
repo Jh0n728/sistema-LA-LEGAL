@@ -56,12 +56,6 @@ cuenta_seleccionada = st.sidebar.selectbox(
     "Seleccione la Cuenta a Revisar:",
     ["db_cuenta_33", "db_cuenta_14"]
 )
-
-st.sidebar.markdown("---")
-if st.sidebar.button("Cerrar Sesión"):
-    st.session_state.autenticado = False
-    st.session_state.usuario = ""
-    st.rerun()
 # --- SECCIÓN: ACTUALIZAR REGISTROS DIARIOS ---
 st.sidebar.markdown("---")
 st.subheader("Actualizar Registros Diarios")
@@ -101,6 +95,13 @@ if archivo_subido is not None:
                 st.error(f"Ocurrió un error al insertar los datos. Revisa que las columnas coincidan con la base de datos. Detalle: {e}")
     except Exception as e:
         st.error(f"Error al leer el archivo subido: {e}")
+
+st.sidebar.markdown("---")
+if st.sidebar.button("Cerrar Sesión"):
+    st.session_state.autenticado = False
+    st.session_state.usuario = ""
+    st.rerun()
+
 
 # Conexión persistente y limpia a MySQL (XAMPP)
 # Conexión a la base de datos SQLite local/en la nube
