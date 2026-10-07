@@ -76,26 +76,36 @@ if st.sidebar.button("Cerrar Sesión"):
 try:
     engine = conectar_db(cuenta_seleccionada)
     
-    # Obtener las columnas reales de la tabla pagos en la BD activa
     with engine.connect() as conn:
-        cols_info = pd.read_sql("PRAGMA table_info(pagos);", con=conn)
+        # 1. Obtener las tablas disponibles en la base de datos
+        tables_info = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table';", con=conn)
+        tablas_disponibles = tables_info['name'].tolist() if not tables_info.empty else []
+        
+        # 2. Seleccionar el nombre de la tabla de forma inteligente ('pagos' si existe, o la primera que encuentre)
+        nombre_tabla = 'pagos' if 'pagos' in tablas_disponibles else (tablas_disponibles[0] if tablas_disponibles else 'pagos')
+        
+        # 3. Obtener columnas de esa tabla
+        cols_info = pd.read_sql(f"PRAGMA table_info({nombre_tabla});", con=conn)
         columnas_tabla = cols_info['name'].tolist() if not cols_info.empty else []
     
     # Búsqueda inteligente de la columna de depósito
-    col_deposito_real = next((c for c in columnas_tabla if any(k in c.lower() for k in ['deposito', 'comprobante', 'nro', 'numero', 'transaccion', 'recibo'])), 'nro_deposito')
-    if col_deposito_real not in columnas_tabla:
-        col_deposito_real = columnas_tabla[0] if columnas_tabla else 'nro_deposito'
+    col_deposito_real = next((c for c in columnas_tabla if any(k in c.lower() for k in ['deposito', 'comprobante', 'nro', 'numero', 'transaccion', 'recibo'])), 'nro_deposito' if 'nro_deposito' in columnas_tabla else (columnas_tabla[1] if len(columnas_tabla) > 1 else 'nro_deposito'))
 
 except Exception as e:
     st.error(f"Error al conectar con la base de datos local: {e}")
+    tablas_disponibles = []
+    nombre_tabla = "pagos"
+    columnas_tabla = []
+    col_deposito_real = "nro_deposito"
     st.stop()
 
 # --- PANEL DE DIAGNOSTICO EN LA BARRA LATERAL ---
-with st.sidebar.expander("🔍 Diagnóstico de Columnas"):
+with st.sidebar.expander("🔍 Diagnóstico de Base de Datos"):
     st.write(f"**Base de datos:** {cuenta_seleccionada}")
-    st.write(f"**Columna detectada para depósito:** `{col_deposito_real}`")
-    st.write("**Todas las columnas disponibles en la BD:**")
-    st.write(columnas_tabla)
+    st.write(f"**Tablas encontradas:** {tablas_disponibles}")
+    st.write(f"**Tabla seleccionada:** `{nombre_tabla}`")
+    st.write(f"**Columna de depósito:** `{col_deposito_real}`")
+    st.write(f"**Columnas:** {columnas_tabla}")
 
 # Encabezado principal
 nombre_cuenta_visible = "Cuenta 33" if "33" in cuenta_seleccionada else "Cuenta 14"
@@ -110,7 +120,7 @@ col_busq, col_monto, col_fecha = st.columns(3)
 with col_busq:
     busqueda = st.text_input("Escriba el Nombre o N° de Depósito (Presione Enter):", placeholder="Ej: Juan Pérez o 15271987")
     st.markdown("**Filtro Especial de Control:**")
-    solo_sin_hoja = st.checkbox("Mostrar SOLO depósitos SIN Hoja de Ruta")
+    solo_sin_hoja = st.checkbox("Mostrar SOLO depósitos SIN Hoja de Ruta") if "hoja_de_ruta" in columnas_tabla else False
     
 with col_monto:
     st.markdown("**Filtrar por Monto:**")
@@ -144,18 +154,32 @@ if busqueda.strip():
     palabras = busqueda.strip().split()
     condiciones_palabras = []
     for p in palabras:
-        condiciones_palabras.append(f"(nombre LIKE ? OR {col_deposito_real} LIKE ? OR participante LIKE ?)")
-        params.extend([f"%{p}%", f"%{p}%", f"%{p}%"])
-    where_clauses.append("(" + " AND ".join(condiciones_palabras) + ")")
+        # Validar qué columnas existen para evitar errores de búsqueda
+        cond_cols = []
+        if "nombre" in columnas_tabla:
+            cond_cols.append("nombre LIKE ?")
+            params.append(f"%{p}%")
+        if col_deposito_real in columnas_tabla:
+            cond_cols.append(f"{col_deposito_real} LIKE ?")
+            params.append(f"%{p}%")
+        if "participante" in columnas_tabla:
+            cond_cols.append("participante LIKE ?")
+            params.append(f"%{p}%")
+            
+        if cond_cols:
+            condiciones_palabras.append("(" + " OR ".join(cond_cols) + ")")
+            
+    if condiciones_palabras:
+        where_clauses.append("(" + " AND ".join(condiciones_palabras) + ")")
 
-if solo_sin_hoja:
+if solo_sin_hoja and "hoja_de_ruta" in columnas_tabla:
     where_clauses.append("(hoja_de_ruta IS NULL OR TRIM(hoja_de_ruta) = '' OR LOWER(TRIM(hoja_de_ruta)) = 'none')")
 
-if filtrar_monto and monto_buscado > 0:
+if filtrar_monto and monto_buscado > 0 and "monto" in columnas_tabla:
     where_clauses.append("monto = ?")
     params.append(monto_buscado)
 
-if filtrar_fecha:
+if filtrar_fecha and "fecha" in columnas_tabla:
     where_clauses.append("fecha BETWEEN ? AND ?")
     params.extend([str(fecha_inicio), str(fecha_fin)])
 
@@ -163,8 +187,20 @@ where_sql = ""
 if where_clauses:
     where_sql = " WHERE " + " AND ".join(where_clauses)
 
-query_total = f"SELECT SUM(monto) as total_monto, COUNT(*) as total_registros FROM pagos" + where_sql
-query_tabla = f"SELECT fecha, {col_deposito_real} AS nro_deposito, nombre, participante, monto, hoja_de_ruta, programa_descripcion, mes_declaracion, obs FROM pagos" + where_sql + " LIMIT 500"
+query_total = f"SELECT SUM(monto) as total_monto, COUNT(*) as total_registros FROM {nombre_tabla}" + where_sql if "monto" in columnas_tabla else f"SELECT 0 as total_monto, COUNT(*) as total_registros FROM {nombre_tabla}" + where_sql
+
+# Construir selección de columnas segura para la tabla
+col_fecha_sel = "fecha" if "fecha" in columnas_tabla else "'' AS fecha"
+col_dep_sel = f"{col_deposito_real} AS nro_deposito" if col_deposito_real in columnas_tabla else "'' AS nro_deposito"
+col_nom_sel = "nombre" if "nombre" in columnas_tabla else "'' AS nombre"
+col_part_sel = "participante" if "participante" in columnas_tabla else "'' AS participante"
+col_monto_sel = "monto" if "monto" in columnas_tabla else "0 AS monto"
+col_hoja_sel = "hoja_de_ruta" if "hoja_de_ruta" in columnas_tabla else "'' AS hoja_de_ruta"
+col_prog_sel = "programa_descripcion" if "programa_descripcion" in columnas_tabla else "'' AS programa_descripcion"
+col_mes_sel = "mes_declaracion" if "mes_declaracion" in columnas_tabla else "'' AS mes_declaracion"
+col_obs_sel = "obs" if "obs" in columnas_tabla else "'' AS obs"
+
+query_tabla = f"SELECT {col_fecha_sel}, {col_dep_sel}, {col_nom_sel}, {col_part_sel}, {col_monto_sel}, {col_hoja_sel}, {col_prog_sel}, {col_mes_sel}, {col_obs_sel} FROM {nombre_tabla}" + where_sql + " LIMIT 500"
 
 # --- BLOQUE FIJO DE RENDERIZADO ---
 with st.container():
@@ -237,8 +273,8 @@ with st.sidebar.expander("Cargar Datos"):
             if st.button("Confirmar e Insertar", key="btn_confirmar_admin"):
                 try:
                     engine_actualizacion = conectar_db(db_para_actualizar)
-                    df_nuevos.to_sql("pagos", con=engine_actualizacion, if_exists="append", index=False)
-                    st.success(f"¡{len(df_nuevos)} registros agregados a {db_para_actualizar}!")
+                    df_nuevos.to_sql(nombre_tabla, con=engine_actualizacion, if_exists="append", index=False)
+                    st.success(f"¡{len(df_nuevos)} registros agregados a {db_para_actualizar} ({nombre_tabla})!")
                 except Exception as e:
                     st.error(f"Error al insertar. Revisa las columnas. Detalle: {e}")
         except Exception as e:
@@ -255,7 +291,7 @@ with st.sidebar.expander("Modificar Registro"):
             engine_edicion = conectar_db(cuenta_seleccionada)
             with engine_edicion.connect() as conn:
                 trans = conn.begin()
-                query_update = text(f"UPDATE pagos SET monto = :monto WHERE {col_deposito_real} = :nro")
+                query_update = text(f"UPDATE {nombre_tabla} SET monto = :monto WHERE {col_deposito_real} = :nro")
                 conn.execute(query_update, {"monto": nuevo_monto, "nro": deposito_a_editar})
                 trans.commit()
             
