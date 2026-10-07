@@ -7,15 +7,13 @@ import os
 # Obtener la ruta absoluta del directorio actual donde está app.py
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Función de conexión a SQLite con permisos de escritura explícitos y multihilo
+# Función de conexión a SQLite optimizada para Streamlit y escritura
 @st.cache_resource
 def conectar_db(db_name):
     db_path = os.path.join(BASE_DIR, f"{db_name}.db")
-    # Convertir ruta a formato URI absoluto para obligar el modo de escritura (rw)
-    db_uri = f"sqlite:///{db_path}?mode=rw"
+    db_uri = f"sqlite:///{db_path}"
     return create_engine(
         db_uri, 
-        creator=lambda: __import__('sqlite3').connect(db_path, uri=True),
         connect_args={"check_same_thread": False}
     )
 
