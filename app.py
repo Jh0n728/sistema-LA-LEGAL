@@ -32,7 +32,6 @@ if "usuario" not in st.session_state:
 def mostrar_login():
     st.markdown("<h2 style='text-align: center;'> Acceso al Sistema </h2>", unsafe_allow_html=True)
     
-    # CORRECCIÓN AQUÍ: Se especifica explícitamente el número 3 para crear las columnas
     col1, col2, col3 = st.columns(3)
     with col2:
         with st.form("form_login"):
@@ -70,7 +69,6 @@ if st.sidebar.button("Cerrar Sesión"):
     st.session_state.usuario = ""
     st.rerun()
 
-
 try:
     engine = conectar_db(cuenta_seleccionada)
 except Exception as e:
@@ -101,7 +99,6 @@ with col_fecha:
     st.markdown("**Filtrar por Fechas:**")
     filtrar_fecha = st.checkbox("Activar filtro de fechas")
     
-    # Reemplaza estas dos líneas:
     fecha_inicio = st.date_input(
         "Desde la fecha:", 
         value=pd.to_datetime("2025-01-01").date(),
@@ -121,30 +118,22 @@ st.markdown("---")
 where_clauses = []
 params = []
 
-
-# Filtro por cuadro de búsqueda principal
 if busqueda.strip():
     palabras = busqueda.strip().split()
     condiciones_palabras = []
     for p in palabras:
-        # Añadimos OR participante LIKE ? para que busque también en esa columna
         condiciones_palabras.append("(nombre LIKE ? OR nro_deposito LIKE ? OR participante LIKE ?)")
         params.extend([f"%{p}%", f"%{p}%", f"%{p}%"])
     where_clauses.append("(" + " AND ".join(condiciones_palabras) + ")")
 
-# Lógica del filtro para aislar depósitos sin Hoja de Ruta
 if solo_sin_hoja:
     where_clauses.append("(hoja_de_ruta IS NULL OR TRIM(hoja_de_ruta) = '' OR LOWER(TRIM(hoja_de_ruta)) = 'none')")
 
-# Filtro por monto exacto
 if filtrar_monto and monto_buscado > 0:
-    # CAMBIO: Usamos ? en lugar de %s
     where_clauses.append("monto = ?")
     params.append(monto_buscado)
 
-# Filtro por rango de fechas
 if filtrar_fecha:
-    # CAMBIO: Usamos ? en lugar de %s
     where_clauses.append("fecha BETWEEN ? AND ?")
     params.extend([str(fecha_inicio), str(fecha_fin)])
 
@@ -152,19 +141,17 @@ where_sql = ""
 if where_clauses:
     where_sql = " WHERE " + " AND ".join(where_clauses)
 
-# Consultas preparadas
 query_total = f"SELECT SUM(monto) as total_monto, COUNT(*) as total_registros FROM pagos" + where_sql
 query_tabla = f"SELECT fecha, nro_deposito, nombre, participante, monto, hoja_de_ruta, programa_descripcion, mes_declaracion, obs FROM pagos" + where_sql + " LIMIT 500"
+
 # --- BLOQUE FIJO DE RENDERIZADO ---
 with st.container():
     try:
         with engine.connect() as conn:
-            # 1. Obtener totales globales de la consulta actual
             df_totales = pd.read_sql(query_total, con=conn, params=tuple(params) if params else None)
             total_registros = int(df_totales["total_registros"].iloc[0]) if not df_totales.empty and pd.notna(df_totales["total_registros"].iloc[0]) else 0
             monto_global = float(df_totales["total_monto"].iloc[0]) if not df_totales.empty and pd.notna(df_totales["total_monto"].iloc[0]) else 0.0
 
-            # Mostrar totales usando Métricas estáticas
             c1, c2 = st.columns(2)
             with c1:
                 st.metric(label="Monto Total General Acumulado", value=f"{monto_global:,.2f} Bs")
@@ -175,10 +162,8 @@ with st.container():
             st.markdown("#### Detalle de Transacciones")
 
             if total_registros > 0:
-                # 2. Cargar los registros
                 df = pd.read_sql(query_tabla, con=conn, params=tuple(params) if params else None)
                 
-                # Formatear nombres de columnas para la interfaz
                 df = df.rename(columns={
                     "fecha": "Fecha",
                     "nro_deposito": "N° Depósito",
@@ -191,58 +176,47 @@ with st.container():
                     "obs": "Observaciones"
                 })
 
-                # Mostrar el DataFrame directamente en pantalla
                 st.dataframe(df, use_container_width=True, height=500)
             else:
                 st.info("No hay transacciones registradas o ningún elemento coincide con el filtro aplicado.")
                 
     except Exception as e:
-        st.error(f"Error al realizar la lectura en MySQL: {e}")
+        st.error(f"Error al realizar la lectura: {e}")
 
 # --- SECCIÓN: ACTUALIZAR REGISTROS DIARIOS EN LA BARRA LATERAL ---
 with st.sidebar.expander("Cargar Datos"):
     st.markdown("### Actualizar Registros")
     
-    # Selector para elegir a qué base de datos impactar
     db_para_actualizar = st.selectbox(
         "Base de datos a actualizar",
         ["db_cuenta_33", "db_cuenta_14"],
         key="select_db_admin"
     )
 
-    # Subir archivo Excel o CSV con los nuevos depósitos
     archivo_subido = st.file_uploader(
         "Subir nuevos depósitos (Excel/CSV)", 
         type=["xlsx", "csv"],
         key="uploader_admin"
     )
 
-if archivo_subido is not None:
+    # El procesamiento y vista previa ahora están dentro del expander de la barra lateral
+    if archivo_subido is not None:
         try:
             if archivo_subido.name.endswith(".csv"):
                 df_nuevos = pd.read_csv(archivo_subido)
             else:
                 df_nuevos = pd.read_excel(archivo_subido)
             
-            # --- AÑADE ESTO PARA LIMPIAR LA HORA DE LA FECHA ---
             if 'fecha' in df_nuevos.columns:
                 df_nuevos['fecha'] = pd.to_datetime(df_nuevos['fecha']).dt.strftime('%Y-%m-%d')
-            # --------------------------------------------------
 
-            st.write("Vista previa:")
-            st.dataframe(df_nuevos, use_container_width=True)
-            
             st.write("Vista previa:")
             st.dataframe(df_nuevos, use_container_width=True)
 
             if st.button("Confirmar e Insertar", key="btn_confirmar_admin"):
                 try:
-                    # Usamos tu propia función conectar_db ya definida en el sistema
                     engine_actualizacion = conectar_db(db_para_actualizar)
-                    
-                    # Inserta los datos al final de la tabla 'pagos'
                     df_nuevos.to_sql("pagos", con=engine_actualizacion, if_exists="append", index=False)
-                    
                     st.success(f"¡{len(df_nuevos)} registros agregados a {db_para_actualizar}!")
                 except Exception as e:
                     st.error(f"Error al insertar. Revisa las columnas. Detalle: {e}")
