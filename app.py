@@ -11,12 +11,15 @@ st.set_page_config(page_title="Sistema de Revisión de Pagos", layout="wide")
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
-# Función de conexión simplificada y compatible con escritura en SQLite
+# Función de conexión con permisos explícitos de lectura y escritura (rw)
 @st.cache_resource
 def conectar_db(db_name):
     db_path = os.path.join(BASE_DIR, f"{db_name}.db")
+    # Forzamos el uso de URI con modo de acceso rw (read/write)
+    db_uri = f"sqlite:///{db_path}?mode=rw"
     return create_engine(
-        f"sqlite:///{db_path}",
+        db_uri,
+        creator=lambda: sqlite3.connect(db_path, uri=True),
         connect_args={"check_same_thread": False}
     )
 # --- CREDENCIALES DE ACCESO ---
@@ -233,9 +236,12 @@ with st.sidebar.expander("Modificar Registro"):
     if st.button("Actualizar Monto", key="btn_editar_monto"):
         try:
             engine_edicion = conectar_db(cuenta_seleccionada)
-            with engine_edicion.begin() as conn:
+            # Abrimos la conexión asegurando habilitar escritura a nivel de sqlite3
+            with engine_edicion.connect() as conn:
+                trans = conn.begin()
                 query_update = text("UPDATE pagos SET monto = :monto WHERE nro_deposito = :nro")
                 conn.execute(query_update, {"monto": nuevo_monto, "nro": deposito_a_editar})
+                trans.commit()
             
             st.success(f"¡Depósito {deposito_a_editar} actualizado a {nuevo_monto} Bs!")
             st.rerun()
