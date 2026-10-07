@@ -76,16 +76,26 @@ if st.sidebar.button("Cerrar Sesión"):
 try:
     engine = conectar_db(cuenta_seleccionada)
     
-    # Detección automática del nombre real de la columna de depósito en la base de datos activa
+    # Obtener las columnas reales de la tabla pagos en la BD activa
     with engine.connect() as conn:
         cols_info = pd.read_sql("PRAGMA table_info(pagos);", con=conn)
         columnas_tabla = cols_info['name'].tolist() if not cols_info.empty else []
     
-    col_deposito_real = next((c for c in columnas_tabla if any(k in c.lower() for k in ['deposito', 'comprobante', 'nro', 'numero', 'transaccion'])), 'nro_deposito')
+    # Búsqueda inteligente de la columna de depósito
+    col_deposito_real = next((c for c in columnas_tabla if any(k in c.lower() for k in ['deposito', 'comprobante', 'nro', 'numero', 'transaccion', 'recibo'])), 'nro_deposito')
+    if col_deposito_real not in columnas_tabla:
+        col_deposito_real = columnas_tabla[0] if columnas_tabla else 'nro_deposito'
 
 except Exception as e:
     st.error(f"Error al conectar con la base de datos local: {e}")
     st.stop()
+
+# --- PANEL DE DIAGNOSTICO EN LA BARRA LATERAL ---
+with st.sidebar.expander("🔍 Diagnóstico de Columnas"):
+    st.write(f"**Base de datos:** {cuenta_seleccionada}")
+    st.write(f"**Columna detectada para depósito:** `{col_deposito_real}`")
+    st.write("**Todas las columnas disponibles en la BD:**")
+    st.write(columnas_tabla)
 
 # Encabezado principal
 nombre_cuenta_visible = "Cuenta 33" if "33" in cuenta_seleccionada else "Cuenta 14"
