@@ -3,6 +3,7 @@ import sqlite3
 import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, text
+from sqlalchemy.pool import NullPool
 
 # Configuración de la página (DEBE SER LO PRIMERO)
 st.set_page_config(page_title="Sistema de Revisión de Pagos", layout="wide")
@@ -10,17 +11,14 @@ st.set_page_config(page_title="Sistema de Revisión de Pagos", layout="wide")
 # Directorio base donde se encuentran las bases de datos
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-
-# Función de conexión con permisos explícitos de lectura y escritura (rw)
+# Función de conexión definitiva
 @st.cache_resource
 def conectar_db(db_name):
     db_path = os.path.join(BASE_DIR, f"{db_name}.db")
-    # Forzamos el uso de URI con modo de acceso rw (read/write)
-    db_uri = f"sqlite:///{db_path}?mode=rw"
     return create_engine(
-        db_uri,
-        creator=lambda: sqlite3.connect(db_path, uri=True),
-        connect_args={"check_same_thread": False}
+        f"sqlite:///{db_path}",
+        connect_args={"check_same_thread": False},
+        poolclass=NullPool
     )
 # --- CREDENCIALES DE ACCESO ---
 USUARIOS_PERMITIDOS = {
