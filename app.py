@@ -228,8 +228,8 @@ with st.sidebar.expander("Cargar Datos"):
 # --- SECCIÓN: EDITAR MONTO DE UN DEPÓSITO ---
 with st.sidebar.expander("Modificar Registro"):
     st.markdown("### Modificar Monto")
-    deposito_a_editar = st.text_input("N° de Depósito a corregir", value="5751288549")
-    nuevo_monto = st.number_input("Nuevo Monto en Bs:", value=300.0, step=10.0)
+    deposito_a_editar = st.text_input("N° de Depósito a corregir", placeholder="Ej: 15271987")
+    nuevo_monto = st.number_input("Nuevo Monto en Bs:", 0, step=0.01, format="%.2f")
     
     if st.button("Actualizar Monto", key="btn_editar_monto"):
         try:
