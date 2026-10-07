@@ -1,10 +1,14 @@
 import os
 import sqlite3
 import streamlit as st
+import pandas as pd
 from sqlalchemy import create_engine, text
 
-# Función de conexión a SQLite
-import sqlite3
+# Configuración de la página (DEBE SER LO PRIMERO)
+st.set_page_config(page_title="Sistema de Revisión de Pagos", layout="wide")
+
+# Directorio base donde se encuentran las bases de datos
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Función de conexión a SQLite compatible con multihilo y escritura forzada
 @st.cache_resource
@@ -16,9 +20,6 @@ def conectar_db(db_name):
         creator=lambda: sqlite3.connect(db_path, uri=True),
         connect_args={"check_same_thread": False}
     )
-
-# Configuración de la página (DEBE SER LO PRIMERO)
-st.set_page_config(page_title="Sistema de Revisión de Pagos", layout="wide")
 
 # --- CREDENCIALES DE ACCESO ---
 USUARIOS_PERMITIDOS = {
@@ -202,7 +203,6 @@ with st.sidebar.expander("Cargar Datos"):
         key="uploader_admin"
     )
 
-    # El procesamiento y vista previa ahora están dentro del expander de la barra lateral
     if archivo_subido is not None:
         try:
             if archivo_subido.name.endswith(".csv"):
@@ -234,15 +234,12 @@ with st.sidebar.expander("Modificar Registro"):
     
     if st.button("Actualizar Monto", key="btn_editar_monto"):
         try:
-            # Usamos la cuenta seleccionada actualmente en el menú superior de la barra lateral
             engine_edicion = conectar_db(cuenta_seleccionada)
             with engine_edicion.begin() as conn:
-                # Ejecutamos la consulta SQL de actualización
                 query_update = text("UPDATE pagos SET monto = :monto WHERE nro_deposito = :nro")
                 conn.execute(query_update, {"monto": nuevo_monto, "nro": deposito_a_editar})
             
             st.success(f"¡Depósito {deposito_a_editar} actualizado a {nuevo_monto} Bs!")
-            st.rerun() # Recarga la app para ver el cambio reflejado inmediatamente
+            st.rerun()
         except Exception as e:
             st.error(f"Error al actualizar: {e}")
-#subir a github y ya ta
