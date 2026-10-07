@@ -20,6 +20,7 @@ def conectar_db(db_name):
         connect_args={"check_same_thread": False},
         poolclass=NullPool
     )
+
 # --- CREDENCIALES DE ACCESO ---
 USUARIOS_PERMITIDOS = {
     "TilinTolon": "TILINTOLON2026",
@@ -95,8 +96,32 @@ with col_busq:
     
 with col_monto:
     st.markdown("**Filtrar por Monto:**")
-    filtrar_monto = st.checkbox("Activar filtro de cantidad exacta")
-    monto_buscado = st.number_input("Monto en Bs:", value=0.0, step=10.0)
+    filtrar_monto = st.checkbox("Activar filtro de monto exacto")
+    monto_buscado = st.number_input("Monto exacto en Bs:", value=0.0, step=10.0)
+    
+    # --- NUEVO: FILTRO POR RANGO DE MONTOS (SLIDER) ---
+    st.markdown("---")
+    st.markdown("**Rango de Montos (Mín - Máx):**")
+    filtrar_rango = st.checkbox("Activar filtro por rango de montos")
+    
+    # Consultamos los límites reales de la base de datos actual para ajustar el slider
+    try:
+        with engine.connect() as conn_rango:
+            df_limites = pd.read_sql("SELECT MIN(monto) as min_m, MAX(monto) as max_m FROM pagos", con=conn_rango)
+            db_min = float(df_limites["min_m"].iloc[0]) if not df_limites.empty and pd.notna(df_limites["min_m"].iloc[0]) else 0.0
+            db_max = float(df_limites["max_m"].iloc[0]) if not df_limites.empty and pd.notna(df_limites["max_m"].iloc[0]) else 10000.0
+            if db_min == db_max:
+                db_max = db_min + 100.0
+    except:
+        db_min, db_max = 0.0, 10000.0
+
+    rango_montos = st.slider(
+        "Seleccione intervalo:",
+        min_value=db_min,
+        max_value=db_max,
+        value=(db_min, db_max),
+        step=1.0
+    )
     
 with col_fecha:
     st.markdown("**Filtrar por Fechas:**")
@@ -105,202 +130,3 @@ with col_fecha:
     fecha_inicio = st.date_input(
         "Desde la fecha:", 
         value=pd.to_datetime("2025-01-01").date(),
-        min_value=pd.to_datetime("2015-01-01").date(),
-        max_value=pd.to_datetime("2030-12-31").date()
-    )
-    fecha_fin = st.date_input(
-        "Hasta la fecha:", 
-        value=pd.to_datetime("2026-12-31").date(),
-        min_value=pd.to_datetime("2015-01-01").date(),
-        max_value=pd.to_datetime("2030-12-31").date()
-    )
-
-st.markdown("---")
-
-# --- CONSTRUCCIÓN DINÁMICA DE LA CONSULTA SQL ---
-where_clauses = []
-params = []
-
-if busqueda.strip():
-    palabras = busqueda.strip().split()
-    condiciones_palabras = []
-    for p in palabras:
-        condiciones_palabras.append("(nombre LIKE ? OR nro_deposito LIKE ? OR participante LIKE ?)")
-        params.extend([f"%{p}%", f"%{p}%", f"%{p}%"])
-    where_clauses.append("(" + " AND ".join(condiciones_palabras) + ")")
-
-if solo_sin_hoja:
-    where_clauses.append("(hoja_de_ruta IS NULL OR TRIM(hoja_de_ruta) = '' OR LOWER(TRIM(hoja_de_ruta)) = 'none')")
-
-if filtrar_monto and monto_buscado > 0:
-    where_clauses.append("monto = ?")
-    params.append(monto_buscado)
-
-if filtrar_fecha:
-    where_clauses.append("fecha BETWEEN ? AND ?")
-    params.extend([str(fecha_inicio), str(fecha_fin)])
-
-where_sql = ""
-if where_clauses:
-    where_sql = " WHERE " + " AND ".join(where_clauses)
-
-query_total = f"SELECT SUM(monto) as total_monto, COUNT(*) as total_registros FROM pagos" + where_sql
-query_tabla = f"SELECT fecha, nro_deposito, nombre, participante, monto, hoja_de_ruta, programa_descripcion, mes_declaracion, obs FROM pagos" + where_sql + " LIMIT 500"
-
-# --- BLOQUE FIJO DE RENDERIZADO ---
-with st.container():
-    try:
-        with engine.connect() as conn:
-            df_totales = pd.read_sql(query_total, con=conn, params=tuple(params) if params else None)
-            total_registros = int(df_totales["total_registros"].iloc[0]) if not df_totales.empty and pd.notna(df_totales["total_registros"].iloc[0]) else 0
-            monto_global = float(df_totales["total_monto"].iloc[0]) if not df_totales.empty and pd.notna(df_totales["total_monto"].iloc[0]) else 0.0
-
-            c1, c2 = st.columns(2)
-            with c1:
-                st.metric(label="Monto Total General Acumulado", value=f"{monto_global:,.2f} Bs")
-            with c2:
-                texto_registros = f"{total_registros:,} (Mostrando primeros 500)" if total_registros > 500 else f"{total_registros:,}"
-                st.metric(label="Registros Coincidentes", value=texto_registros)
-
-            st.markdown("#### Detalle de Transacciones")
-
-            if total_registros > 0:
-                df = pd.read_sql(query_tabla, con=conn, params=tuple(params) if params else None)
-                
-                df = df.rename(columns={
-                    "fecha": "Fecha",
-                    "nro_deposito": "N° Depósito",
-                    "nombre": "Nombre Completo",
-                    "participante": "Participante",
-                    "monto": "Monto (Bs)",
-                    "hoja_de_ruta": "Hoja de Ruta",
-                    "programa_descripcion": "Descripción",
-                    "mes_declaracion": "Mes Declaración",
-                    "obs": "Observaciones"
-                })
-
-                st.dataframe(df, use_container_width=True, height=500)
-            else:
-                st.info("No hay transacciones registradas o ningún elemento coincide con el filtro aplicado.")
-                
-    except Exception as e:
-        st.error(f"Error al realizar la lectura: {e}")
-
-# --- SECCIÓN: ACTUALIZAR REGISTROS DIARIOS EN LA BARRA LATERAL ---
-with st.sidebar.expander("Cargar Datos"):
-  st.markdown("### Actualizar Registros")
-
-  db_para_actualizar = st.selectbox(
-      "Base de datos a actualizar",
-      ["db_cuenta_33", "db_cuenta_14"],
-      key="select_db_admin",
-  )
-
-  archivo_subido = st.file_uploader(
-      "Subir nuevos depósitos (Excel/CSV)", type=["xlsx", "csv"], key="uploader_admin"
-  )
-
-  if archivo_subido is not None:
-    try:
-      if archivo_subido.name.endswith(".csv"):
-        df_nuevos = pd.read_csv(archivo_subido)
-      else:
-        df_nuevos = pd.read_excel(archivo_subido)
-
-      # Normalizamos los nombres de las columnas del archivo subido a minúsculas
-      # para evitar errores si vienen con mayúsculas o espacios
-      df_nuevos.columns = [str(c).strip().lower() for c in df_nuevos.columns]
-
-      # Mapeo por si el Excel nuevo tiene nombres de columna diferentes a la BD
-      renombres = {
-          "nº deposito": "nro_deposito",
-          "n° deposito": "nro_deposito",
-          "nro deposito": "nro_deposito",
-          "nombre": "nombre",
-          "participante": "participante",
-          "monto": "monto",
-          "hoja de ruta": "hoja_de_ruta",
-          "descripcion": "programa_descripcion",
-          "mes declaracion": "mes_declaracion",
-          "obs": "obs",
-      }
-      df_nuevos = df_nuevos.rename(columns=renombres)
-
-      if "fecha" in df_nuevos.columns:
-        df_nuevos["fecha"] = pd.to_datetime(df_nuevos["fecha"]).dt.strftime(
-            "%Y-%m-%d"
-        )
-
-      # --- LÓGICA DE ANTIDUPLICADOS ---
-      engine_temp = conectar_db(db_para_actualizar)
-      with engine_temp.connect() as conn:
-        # Obtenemos los números de depósito que ya existen en la base de datos
-        df_existentes = pd.read_sql(
-            "SELECT DISTINCT nro_deposito FROM pagos", con=conn
-        )
-        depositos_existentes = set(
-            df_existentes["nro_deposito"].astype(str).str.strip()
-        )
-
-      # Filtramos el DataFrame nuevo para conservar solo los que NO están en la base de datos
-      if "nro_deposito" in df_nuevos.columns:
-        # Convertimos a string para asegurar una comparación limpia
-        mask_nuevos = ~df_nuevos["nro_deposito"].astype(str).str.strip().isin(
-            depositos_existentes
-        )
-        df_filtrado = df_nuevos[mask_nuevos].copy()
-        duplicados_omitidos = len(df_nuevos) - len(df_filtrado)
-      else:
-        df_filtrado = df_nuevos
-        duplicados_omitidos = 0
-
-      st.write("Vista previa de registros nuevos a insertar:")
-      st.dataframe(df_filtrado, use_container_width=True)
-
-      if duplicados_omitidos > 0:
-        st.info(
-            f"Se omitieron {duplicados_omitidos} registros porque ya"
-            " existían en la base de datos."
-        )
-
-      if len(df_filtrado) > 0:
-        if st.button("Confirmar e Insertar", key="btn_confirmar_admin"):
-          try:
-            df_filtrado.to_sql(
-                "pagos", con=engine_temp, if_exists="append", index=False
-            )
-            st.success(
-                f"¡{len(df_filtrado)} registros nuevos agregados exitosamente a"
-                f" {db_para_actualizar}!"
-            )
-            st.rerun()
-          except Exception as e:
-            st.error(f"Error al insertar. Revisa las columnas. Detalle: {e}")
-      else:
-        st.warning(
-            "Todos los registros del archivo subido ya existen en la base de datos. No hay nada nuevo que agregar."
-        )
-
-    except Exception as e:
-      st.error(f"Error al leer el archivo: {e}")
-
-# --- SECCIÓN: EDITAR MONTO DE UN DEPÓSITO ---
-with st.sidebar.expander("Modificar Registro"):
-    st.markdown("### Modificar Monto")
-    deposito_a_editar = st.text_input("N° de Depósito a corregir", placeholder="Ej: 15271987")
-    nuevo_monto = st.number_input("Nuevo Monto en Bs:", value=0.0, step=10.0)
-    
-    if st.button("Actualizar Monto", key="btn_editar_monto"):
-        try:
-            engine_edicion = conectar_db(cuenta_seleccionada)
-            # Abrimos la conexión asegurando habilitar escritura a nivel de sqlite3
-            with engine_edicion.connect() as conn:
-                trans = conn.begin()
-                query_update = text("UPDATE pagos SET monto = :monto WHERE nro_deposito = :nro")
-                conn.execute(query_update, {"monto": nuevo_monto, "nro": deposito_a_editar})
-                trans.commit()
-            
-            st.success(f"¡Depósito {deposito_a_editar} actualizado a {nuevo_monto} Bs!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error al actualizar: {e}")
