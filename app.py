@@ -77,19 +77,14 @@ try:
     engine = conectar_db(cuenta_seleccionada)
     
     with engine.connect() as conn:
-        # 1. Obtener las tablas disponibles en la base de datos
         tables_info = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table';", con=conn)
         tablas_disponibles = tables_info['name'].tolist() if not tables_info.empty else []
-        
-        # 2. Seleccionar el nombre de la tabla de forma inteligente ('pagos' si existe, o la primera que encuentre)
         nombre_tabla = 'pagos' if 'pagos' in tablas_disponibles else (tablas_disponibles[0] if tablas_disponibles else 'pagos')
         
-        # 3. Obtener columnas de esa tabla
         cols_info = pd.read_sql(f"PRAGMA table_info({nombre_tabla});", con=conn)
         columnas_tabla = cols_info['name'].tolist() if not cols_info.empty else []
     
-    # Búsqueda inteligente de la columna de depósito
-    col_deposito_real = next((c for c in columnas_tabla if any(k in c.lower() for k in ['deposito', 'comprobante', 'nro', 'numero', 'transaccion', 'recibo'])), 'nro_deposito' if 'nro_deposito' in columnas_tabla else (columnas_tabla[1] if len(columnas_tabla) > 1 else 'nro_deposito'))
+    col_deposito_real = 'nro_deposito' if 'nro_deposito' in columnas_tabla else (columnas_tabla[1] if len(columnas_tabla) > 1 else 'nro_deposito')
 
 except Exception as e:
     st.error(f"Error al conectar con la base de datos local: {e}")
@@ -102,10 +97,8 @@ except Exception as e:
 # --- PANEL DE DIAGNOSTICO EN LA BARRA LATERAL ---
 with st.sidebar.expander("🔍 Diagnóstico de Base de Datos"):
     st.write(f"**Base de datos:** {cuenta_seleccionada}")
-    st.write(f"**Tablas encontradas:** {tablas_disponibles}")
-    st.write(f"**Tabla seleccionada:** `{nombre_tabla}`")
+    st.write(f"**Tabla:** `{nombre_tabla}`")
     st.write(f"**Columna de depósito:** `{col_deposito_real}`")
-    st.write(f"**Columnas:** {columnas_tabla}")
 
 # Encabezado principal
 nombre_cuenta_visible = "Cuenta 33" if "33" in cuenta_seleccionada else "Cuenta 14"
@@ -154,7 +147,6 @@ if busqueda.strip():
     palabras = busqueda.strip().split()
     condiciones_palabras = []
     for p in palabras:
-        # Validar qué columnas existen para evitar errores de búsqueda
         cond_cols = []
         if "nombre" in columnas_tabla:
             cond_cols.append("nombre LIKE ?")
@@ -189,9 +181,8 @@ if where_clauses:
 
 query_total = f"SELECT SUM(monto) as total_monto, COUNT(*) as total_registros FROM {nombre_tabla}" + where_sql if "monto" in columnas_tabla else f"SELECT 0 as total_monto, COUNT(*) as total_registros FROM {nombre_tabla}" + where_sql
 
-# Construir selección de columnas segura para la tabla
 col_fecha_sel = "fecha" if "fecha" in columnas_tabla else "'' AS fecha"
-col_dep_sel = f"{col_deposito_real} AS nro_deposito" if col_deposito_real in columnas_tabla else "'' AS nro_deposito"
+col_dep_sel = f"COALESCE(NULLIF(TRIM(CAST({col_deposito_real} AS TEXT)), ''), '-') AS nro_deposito" if col_deposito_real in columnas_tabla else "'' AS nro_deposito"
 col_nom_sel = "nombre" if "nombre" in columnas_tabla else "'' AS nombre"
 col_part_sel = "participante" if "participante" in columnas_tabla else "'' AS participante"
 col_monto_sel = "monto" if "monto" in columnas_tabla else "0 AS monto"
@@ -222,6 +213,9 @@ with st.container():
             if total_registros > 0:
                 df = pd.read_sql(query_tabla, con=conn, params=tuple(params) if params else None)
                 
+                # Rellenar cualquier valor nulo restante en el DataFrame de Pandas
+                df['nro_deposito'] = df['nro_deposito'].fillna('-').replace('', '-')
+
                 df = df.rename(columns={
                     "fecha": "Fecha",
                     "nro_deposito": "N° Depósito",
