@@ -81,7 +81,6 @@ except Exception as e:
 # Encabezado principal
 nombre_cuenta_visible = "Cuenta 33" if "33" in cuenta_seleccionada else "Cuenta 14"
 st.title(f"Consulta de Pagos - {nombre_cuenta_visible}")
-st.markdown("Escriba los criterios de búsqueda y presione **Enter** para filtrar los datos.")
 
 # --- SECCIÓN DE FILTROS EN TIEMPO REAL ---
 st.markdown("### Búsqueda y Filtros")
