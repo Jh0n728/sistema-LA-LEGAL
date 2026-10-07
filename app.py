@@ -3,17 +3,17 @@ import pandas as pd
 from sqlalchemy import create_engine, text
 
 # Función de conexión a SQLite
-import os
-# Obtener la ruta absoluta del directorio actual donde está app.py
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+import sqlite3
 
-# Función de conexión a SQLite optimizada para Streamlit y escritura
+# Función de conexión a SQLite compatible con multihilo y escritura forzada
 @st.cache_resource
 def conectar_db(db_name):
     db_path = os.path.join(BASE_DIR, f"{db_name}.db")
-    db_uri = f"sqlite:///{db_path}"
+    # Forzar el modo URI con permisos de lectura y escritura (rw)
+    db_uri = f"file:{db_path}?mode=rw"
     return create_engine(
-        db_uri, 
+        db_uri,
+        creator=lambda: sqlite3.connect(db_path, uri=True),
         connect_args={"check_same_thread": False}
     )
 
