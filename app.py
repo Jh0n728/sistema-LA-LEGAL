@@ -96,32 +96,27 @@ with col_busq:
     
 with col_monto:
     st.markdown("**Filtrar por Monto:**")
-    filtrar_monto = st.checkbox("Activar filtro de monto exacto")
-    monto_buscado = st.number_input("Monto exacto en Bs:", value=0.0, step=10.0)
     
-    # --- NUEVO: FILTRO POR RANGO DE MONTOS (SLIDER) ---
-    st.markdown("---")
-    st.markdown("**Rango de Montos (Mín - Máx):**")
-    filtrar_rango = st.checkbox("Activar filtro por rango de montos")
-    
-    # Consultamos los límites reales de la base de datos actual para ajustar el slider
-    try:
-        with engine.connect() as conn_rango:
-            df_limites = pd.read_sql("SELECT MIN(monto) as min_m, MAX(monto) as max_m FROM pagos", con=conn_rango)
-            db_min = float(df_limites["min_m"].iloc[0]) if not df_limites.empty and pd.notna(df_limites["min_m"].iloc[0]) else 0.0
-            db_max = float(df_limites["max_m"].iloc[0]) if not df_limites.empty and pd.notna(df_limites["max_m"].iloc[0]) else 10000.0
-            if db_min == db_max:
-                db_max = db_min + 100.0
-    except:
-        db_min, db_max = 0.0, 10000.0
-
-    rango_montos = st.slider(
-        "Seleccione intervalo:",
-        min_value=db_min,
-        max_value=db_max,
-        value=(db_min, db_max),
-        step=1.0
+    # Selector rápido para elegir el tipo de filtro de dinero
+    tipo_filtro_monto = st.selectbox(
+        "Modo de filtro de monto",
+        ["Desactivado", "Monto Exacto", "Rango (Mín - Máx)"],
+        label_visibility="collapsed"
     )
+    
+    monto_buscado = 0.0
+    monto_min, monto_max = 0.0, 0.0
+    
+    if tipo_filtro_monto == "Monto Exacto":
+        monto_buscado = st.number_input("Monto exacto en Bs:", value=0.0, step=10.0)
+        
+    elif tipo_filtro_monto == "Rango (Mín - Máx)":
+        col_min, col_max = st.columns(2)
+        with col_min:
+            monto_min = st.number_input("Mínimo Bs:", value=0.0, step=50.0)
+        with col_max:
+            # Consultamos el máximo real para ponerlo por defecto o dejamos un tope alto
+            monto_max = st.number_input("Máximo Bs:", value=5000.0, step=50.0)
     
 with col_fecha:
     st.markdown("**Filtrar por Fechas:**")
@@ -157,26 +152,17 @@ if busqueda.strip():
 if solo_sin_hoja:
     where_clauses.append("(hoja_de_ruta IS NULL OR TRIM(hoja_de_ruta) = '' OR LOWER(TRIM(hoja_de_ruta)) = 'none')")
 
-if filtrar_monto and monto_buscado > 0:
+# Aplicar según la opción de monto seleccionada
+if tipo_filtro_monto == "Monto Exacto" and monto_buscado > 0:
     where_clauses.append("monto = ?")
     params.append(monto_buscado)
-
-# --- NUEVO: AÑADIR RANGO DE MONTOS A LA CONSULTA SQL ---
-if filtrar_rango:
+elif tipo_filtro_monto == "Rango (Mín - Máx)":
     where_clauses.append("monto BETWEEN ? AND ?")
-    params.extend([rango_montos[0], rango_montos[1]])
+    params.extend([monto_min, monto_max])
 
 if filtrar_fecha:
     where_clauses.append("fecha BETWEEN ? AND ?")
     params.extend([str(fecha_inicio), str(fecha_fin)])
-
-where_sql = ""
-if where_clauses:
-    where_sql = " WHERE " + " AND ".join(where_clauses)
-
-query_total = f"SELECT SUM(monto) as total_monto, COUNT(*) as total_registros FROM pagos" + where_sql
-query_tabla = f"SELECT fecha, nro_deposito, nombre, participante, monto, hoja_de_ruta, programa_descripcion, mes_declaracion, obs FROM pagos" + where_sql + " LIMIT 500"
-
 # --- BLOQUE FIJO DE RENDERIZADO ---
 with st.container():
     try:
