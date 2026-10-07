@@ -10,17 +10,15 @@ st.set_page_config(page_title="Sistema de Revisión de Pagos", layout="wide")
 # Directorio base donde se encuentran las bases de datos
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Función de conexión a SQLite compatible con multihilo y escritura forzada
+
+# Función de conexión simplificada y compatible con escritura en SQLite
 @st.cache_resource
 def conectar_db(db_name):
     db_path = os.path.join(BASE_DIR, f"{db_name}.db")
-    db_uri = f"file:{db_path}?mode=rw"
     return create_engine(
-        db_uri,
-        creator=lambda: sqlite3.connect(db_path, uri=True),
+        f"sqlite:///{db_path}",
         connect_args={"check_same_thread": False}
     )
-
 # --- CREDENCIALES DE ACCESO ---
 USUARIOS_PERMITIDOS = {
     "TilinTolon": "TILINTOLON2026",
