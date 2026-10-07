@@ -1,5 +1,6 @@
+import os
+import sqlite3
 import streamlit as st
-import pandas as pd
 from sqlalchemy import create_engine, text
 
 # Función de conexión a SQLite
@@ -9,7 +10,6 @@ import sqlite3
 @st.cache_resource
 def conectar_db(db_name):
     db_path = os.path.join(BASE_DIR, f"{db_name}.db")
-    # Forzar el modo URI con permisos de lectura y escritura (rw)
     db_uri = f"file:{db_path}?mode=rw"
     return create_engine(
         db_uri,
