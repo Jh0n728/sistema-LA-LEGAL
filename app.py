@@ -20,7 +20,6 @@ def conectar_db(db_name):
         connect_args={"check_same_thread": False},
         poolclass=NullPool
     )
-
 # --- CREDENCIALES DE ACCESO ---
 USUARIOS_PERMITIDOS = {
     "TilinTolon": "TILINTOLON2026",
@@ -75,35 +74,9 @@ if st.sidebar.button("Cerrar Sesión"):
 
 try:
     engine = conectar_db(cuenta_seleccionada)
-    
-    with engine.connect() as conn:
-        tables_info = pd.read_sql("SELECT name FROM sqlite_master WHERE type='table';", con=conn)
-        tablas_disponibles = tables_info['name'].tolist() if not tables_info.empty else []
-        nombre_tabla = 'pagos' if 'pagos' in tablas_disponibles else (tablas_disponibles[0] if tablas_disponibles else 'pagos')
-        
-        cols_info = pd.read_sql(f"PRAGMA table_info({nombre_tabla});", con=conn)
-        columnas_tabla = cols_info['name'].tolist() if not cols_info.empty else []
-        
-        # Obtener una pequeña muestra de los primeros registros para ver qué hay realmente en la BD
-        df_muestra = pd.read_sql(f"SELECT * FROM {nombre_tabla} LIMIT 3", con=conn)
-    
-    col_deposito_real = 'nro_deposito' if 'nro_deposito' in columnas_tabla else (columnas_tabla[1] if len(columnas_tabla) > 1 else 'nro_deposito')
-
 except Exception as e:
     st.error(f"Error al conectar con la base de datos local: {e}")
-    tablas_disponibles = []
-    nombre_tabla = "pagos"
-    columnas_tabla = []
-    col_deposito_real = "nro_deposito"
-    df_muestra = pd.DataFrame()
     st.stop()
-
-# --- PANEL DE DIAGNOSTICO EN LA BARRA LATERAL ---
-with st.sidebar.expander("🔍 Diagnóstico Avanzado de Datos"):
-    st.write(f"**Base de datos:** {cuenta_seleccionada}")
-    st.write(f"**Tabla:** `{nombre_tabla}`")
-    st.write("**Primeros registros en bruto (Muestra de la BD):**")
-    st.dataframe(df_muestra, use_container_width=True)
 
 # Encabezado principal
 nombre_cuenta_visible = "Cuenta 33" if "33" in cuenta_seleccionada else "Cuenta 14"
@@ -118,7 +91,7 @@ col_busq, col_monto, col_fecha = st.columns(3)
 with col_busq:
     busqueda = st.text_input("Escriba el Nombre o N° de Depósito (Presione Enter):", placeholder="Ej: Juan Pérez o 15271987")
     st.markdown("**Filtro Especial de Control:**")
-    solo_sin_hoja = st.checkbox("Mostrar SOLO depósitos SIN Hoja de Ruta") if "hoja_de_ruta" in columnas_tabla else False
+    solo_sin_hoja = st.checkbox("Mostrar SOLO depósitos SIN Hoja de Ruta")
     
 with col_monto:
     st.markdown("**Filtrar por Monto:**")
@@ -152,31 +125,18 @@ if busqueda.strip():
     palabras = busqueda.strip().split()
     condiciones_palabras = []
     for p in palabras:
-        cond_cols = []
-        if "nombre" in columnas_tabla:
-            cond_cols.append("nombre LIKE ?")
-            params.append(f"%{p}%")
-        if col_deposito_real in columnas_tabla:
-            cond_cols.append(f"{col_deposito_real} LIKE ?")
-            params.append(f"%{p}%")
-        if "participante" in columnas_tabla:
-            cond_cols.append("participante LIKE ?")
-            params.append(f"%{p}%")
-            
-        if cond_cols:
-            condiciones_palabras.append("(" + " OR ".join(cond_cols) + ")")
-            
-    if condiciones_palabras:
-        where_clauses.append("(" + " AND ".join(condiciones_palabras) + ")")
+        condiciones_palabras.append("(nombre LIKE ? OR nro_deposito LIKE ? OR participante LIKE ?)")
+        params.extend([f"%{p}%", f"%{p}%", f"%{p}%"])
+    where_clauses.append("(" + " AND ".join(condiciones_palabras) + ")")
 
-if solo_sin_hoja and "hoja_de_ruta" in columnas_tabla:
+if solo_sin_hoja:
     where_clauses.append("(hoja_de_ruta IS NULL OR TRIM(hoja_de_ruta) = '' OR LOWER(TRIM(hoja_de_ruta)) = 'none')")
 
-if filtrar_monto and monto_buscado > 0 and "monto" in columnas_tabla:
+if filtrar_monto and monto_buscado > 0:
     where_clauses.append("monto = ?")
     params.append(monto_buscado)
 
-if filtrar_fecha and "fecha" in columnas_tabla:
+if filtrar_fecha:
     where_clauses.append("fecha BETWEEN ? AND ?")
     params.extend([str(fecha_inicio), str(fecha_fin)])
 
@@ -184,19 +144,8 @@ where_sql = ""
 if where_clauses:
     where_sql = " WHERE " + " AND ".join(where_clauses)
 
-query_total = f"SELECT SUM(monto) as total_monto, COUNT(*) as total_registros FROM {nombre_tabla}" + where_sql if "monto" in columnas_tabla else f"SELECT 0 as total_monto, COUNT(*) as total_registros FROM {nombre_tabla}" + where_sql
-
-col_fecha_sel = "fecha" if "fecha" in columnas_tabla else "'' AS fecha"
-col_dep_sel = f"{col_deposito_real} AS nro_deposito" if col_deposito_real in columnas_tabla else "'' AS nro_deposito"
-col_nom_sel = "nombre" if "nombre" in columnas_tabla else "'' AS nombre"
-col_part_sel = "participante" if "participante" in columnas_tabla else "'' AS participante"
-col_monto_sel = "monto" if "monto" in columnas_tabla else "0 AS monto"
-col_hoja_sel = "hoja_de_ruta" if "hoja_de_ruta" in columnas_tabla else "'' AS hoja_de_ruta"
-col_prog_sel = "programa_descripcion" if "programa_descripcion" in columnas_tabla else "'' AS programa_descripcion"
-col_mes_sel = "mes_declaracion" if "mes_declaracion" in columnas_tabla else "'' AS mes_declaracion"
-col_obs_sel = "obs" if "obs" in columnas_tabla else "'' AS obs"
-
-query_tabla = f"SELECT {col_fecha_sel}, {col_dep_sel}, {col_nom_sel}, {col_part_sel}, {col_monto_sel}, {col_hoja_sel}, {col_prog_sel}, {col_mes_sel}, {col_obs_sel} FROM {nombre_tabla}" + where_sql + " LIMIT 500"
+query_total = f"SELECT SUM(monto) as total_monto, COUNT(*) as total_registros FROM pagos" + where_sql
+query_tabla = f"SELECT fecha, nro_deposito, nombre, participante, monto, hoja_de_ruta, programa_descripcion, mes_declaracion, obs FROM pagos" + where_sql + " LIMIT 500"
 
 # --- BLOQUE FIJO DE RENDERIZADO ---
 with st.container():
@@ -218,10 +167,6 @@ with st.container():
             if total_registros > 0:
                 df = pd.read_sql(query_tabla, con=conn, params=tuple(params) if params else None)
                 
-                # Reemplazar nulos o vacíos para visualizar claramente
-                df['nro_deposito'] = df['nro_deposito'].astype(str).str.strip()
-                df['nro_deposito'] = df['nro_deposito'].replace({'': '-', 'None': '-', 'nan': '-', 'None': '-'})
-
                 df = df.rename(columns={
                     "fecha": "Fecha",
                     "nro_deposito": "N° Depósito",
@@ -273,7 +218,30 @@ with st.sidebar.expander("Cargar Datos"):
             if st.button("Confirmar e Insertar", key="btn_confirmar_admin"):
                 try:
                     engine_actualizacion = conectar_db(db_para_actualizar)
-                    df_nuevos.to_sql(nombre_tabla, con=engine_actualizacion, if_exists="append", index=False)
-                    st.success(f"¡{len(df_nuevos)} registros agregados a {db_para_actualizar} ({nombre_tabla})!")
+                    df_nuevos.to_sql("pagos", con=engine_actualizacion, if_exists="append", index=False)
+                    st.success(f"¡{len(df_nuevos)} registros agregados a {db_para_actualizar}!")
                 except Exception as e:
-                    st.error(f"Error al insertar. Re
+                    st.error(f"Error al insertar. Revisa las columnas. Detalle: {e}")
+        except Exception as e:
+            st.error(f"Error al leer el archivo: {e}")
+
+# --- SECCIÓN: EDITAR MONTO DE UN DEPÓSITO ---
+with st.sidebar.expander("Modificar Registro"):
+    st.markdown("### Modificar Monto")
+    deposito_a_editar = st.text_input("N° de Depósito a corregir", value="5751288549")
+    nuevo_monto = st.number_input("Nuevo Monto en Bs:", value=0.0, step=10.0)
+    
+    if st.button("Actualizar Monto", key="btn_editar_monto"):
+        try:
+            engine_edicion = conectar_db(cuenta_seleccionada)
+            # Abrimos la conexión asegurando habilitar escritura a nivel de sqlite3
+            with engine_edicion.connect() as conn:
+                trans = conn.begin()
+                query_update = text("UPDATE pagos SET monto = :monto WHERE nro_deposito = :nro")
+                conn.execute(query_update, {"monto": nuevo_monto, "nro": deposito_a_editar})
+                trans.commit()
+            
+            st.success(f"¡Depósito {deposito_a_editar} actualizado a {nuevo_monto} Bs!")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Error al actualizar: {e}")
