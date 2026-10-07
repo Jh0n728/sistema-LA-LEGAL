@@ -20,6 +20,7 @@ def conectar_db(db_name):
         connect_args={"check_same_thread": False},
         poolclass=NullPool
     )
+
 # --- CREDENCIALES DE ACCESO ---
 USUARIOS_PERMITIDOS = {
     "TilinTolon": "TILINTOLON2026",
@@ -74,6 +75,14 @@ if st.sidebar.button("Cerrar Sesión"):
 
 try:
     engine = conectar_db(cuenta_seleccionada)
+    
+    # Detección automática del nombre real de la columna de depósito en la base de datos activa
+    with engine.connect() as conn:
+        cols_info = pd.read_sql("PRAGMA table_info(pagos);", con=conn)
+        columnas_tabla = cols_info['name'].tolist() if not cols_info.empty else []
+    
+    col_deposito_real = next((c for c in columnas_tabla if any(k in c.lower() for k in ['deposito', 'comprobante', 'nro', 'numero', 'transaccion'])), 'nro_deposito')
+
 except Exception as e:
     st.error(f"Error al conectar con la base de datos local: {e}")
     st.stop()
@@ -125,7 +134,7 @@ if busqueda.strip():
     palabras = busqueda.strip().split()
     condiciones_palabras = []
     for p in palabras:
-        condiciones_palabras.append("(nombre LIKE ? OR nro_deposito LIKE ? OR participante LIKE ?)")
+        condiciones_palabras.append(f"(nombre LIKE ? OR {col_deposito_real} LIKE ? OR participante LIKE ?)")
         params.extend([f"%{p}%", f"%{p}%", f"%{p}%"])
     where_clauses.append("(" + " AND ".join(condiciones_palabras) + ")")
 
@@ -145,7 +154,7 @@ if where_clauses:
     where_sql = " WHERE " + " AND ".join(where_clauses)
 
 query_total = f"SELECT SUM(monto) as total_monto, COUNT(*) as total_registros FROM pagos" + where_sql
-query_tabla = f"SELECT fecha, nro_deposito, nombre, participante, monto, hoja_de_ruta, programa_descripcion, mes_declaracion, obs FROM pagos" + where_sql + " LIMIT 500"
+query_tabla = f"SELECT fecha, {col_deposito_real} AS nro_deposito, nombre, participante, monto, hoja_de_ruta, programa_descripcion, mes_declaracion, obs FROM pagos" + where_sql + " LIMIT 500"
 
 # --- BLOQUE FIJO DE RENDERIZADO ---
 with st.container():
@@ -234,10 +243,9 @@ with st.sidebar.expander("Modificar Registro"):
     if st.button("Actualizar Monto", key="btn_editar_monto"):
         try:
             engine_edicion = conectar_db(cuenta_seleccionada)
-            # Abrimos la conexión asegurando habilitar escritura a nivel de sqlite3
             with engine_edicion.connect() as conn:
                 trans = conn.begin()
-                query_update = text("UPDATE pagos SET monto = :monto WHERE nro_deposito = :nro")
+                query_update = text(f"UPDATE pagos SET monto = :monto WHERE {col_deposito_real} = :nro")
                 conn.execute(query_update, {"monto": nuevo_monto, "nro": deposito_a_editar})
                 trans.commit()
             
