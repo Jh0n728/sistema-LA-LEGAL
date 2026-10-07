@@ -12,7 +12,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 @st.cache_resource
 def conectar_db(db_name):
     db_path = os.path.join(BASE_DIR, f"{db_name}.db")
-    # Forzamos la conexión usando URI para permitir modo lectura/escritura (mode=rw)
     db_uri = f"sqlite:///{db_path}?mode=rw"
     return create_engine(db_uri, creator=lambda: __import__('sqlite3').connect(db_path, uri=True))
 
@@ -72,13 +71,6 @@ if st.sidebar.button("Cerrar Sesión"):
     st.session_state.usuario = ""
     st.rerun()
 
-
-# Conexión persistente y limpia a MySQL (XAMPP)
-# Conexión a la base de datos SQLite local/en la nube
-    @st.cache_resource
-    def conectar_db(db_name):
-        # Añade la extensión .db al nombre seleccionado
-        return create_engine(f"sqlite:///{db_name}.db")
 
 try:
     engine = conectar_db(cuenta_seleccionada)
