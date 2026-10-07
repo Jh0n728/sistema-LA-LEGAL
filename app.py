@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 
 # Función de conexión a SQLite
 import os
@@ -226,4 +226,22 @@ with st.sidebar.expander("Cargar Datos"):
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
 
-
+# --- SECCIÓN: EDITAR MONTO DE UN DEPÓSITO ---
+with st.sidebar.expander("Modificar Registro"):
+    st.markdown("### Modificar Monto")
+    deposito_a_editar = st.text_input("N° de Depósito a corregir", value="5751288549")
+    nuevo_monto = st.number_input("Nuevo Monto en Bs:", value=300.0, step=10.0)
+    
+    if st.button("Actualizar Monto", key="btn_editar_monto"):
+        try:
+            # Usamos la cuenta seleccionada actualmente en el menú superior de la barra lateral
+            engine_edicion = conectar_db(cuenta_seleccionada)
+            with engine_edicion.begin() as conn:
+                # Ejecutamos la consulta SQL de actualización
+                query_update = text("UPDATE pagos SET monto = :monto WHERE nro_deposito = :nro")
+                conn.execute(query_update, {"monto": nuevo_monto, "nro": deposito_a_editar})
+            
+            st.success(f"¡Depósito {deposito_a_editar} actualizado a {nuevo_monto} Bs!")
+            st.rerun() # Recarga la app para ver el cambio reflejado inmediatamente
+        except Exception as e:
+            st.error(f"Error al actualizar: {e}")
