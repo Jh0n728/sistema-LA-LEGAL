@@ -100,8 +100,20 @@ with col_monto:
 with col_fecha:
     st.markdown("**Filtrar por Fechas:**")
     filtrar_fecha = st.checkbox("Activar filtro de fechas")
-    fecha_inicio = st.date_input("Desde la fecha:", value=pd.to_datetime("2015-01-01").date())
-    fecha_fin = st.date_input("Hasta la fecha:", value=pd.to_datetime("2026-12-31").date())
+    
+    # Reemplaza estas dos líneas:
+    fecha_inicio = st.date_input(
+        "Desde la fecha:", 
+        value=pd.to_datetime("2025-01-01").date(),
+        min_value=pd.to_datetime("2015-01-01").date(),
+        max_value=pd.to_datetime("2030-12-31").date()
+    )
+    fecha_fin = st.date_input(
+        "Hasta la fecha:", 
+        value=pd.to_datetime("2026-12-31").date(),
+        min_value=pd.to_datetime("2015-01-01").date(),
+        max_value=pd.to_datetime("2030-12-31").date()
+    )
 
 st.markdown("---")
 
@@ -131,23 +143,10 @@ if filtrar_monto and monto_buscado > 0:
     params.append(monto_buscado)
 
 # Filtro por rango de fechas
-with col_fecha:
-    st.markdown("**Filtrar por Fechas:**")
-    filtrar_fecha = st.checkbox("Activar filtro de fechas")
-    
-    # Agregamos min_value y max_value para ampliar el rango permitido de años
-    fecha_inicio = st.date_input(
-        "Desde la fecha:", 
-        value=pd.to_datetime("2025-01-01").date(),
-        min_value=pd.to_datetime("2015-01-01").date(),
-        max_value=pd.to_datetime("2030-12-31").date()
-    )
-    fecha_fin = st.date_input(
-        "Hasta la fecha:", 
-        value=pd.to_datetime("2026-12-31").date(),
-        min_value=pd.to_datetime("2015-01-01").date(),
-        max_value=pd.to_datetime("2030-12-31").date()
-    )
+if filtrar_fecha:
+    # CAMBIO: Usamos ? en lugar de %s
+    where_clauses.append("fecha BETWEEN ? AND ?")
+    params.extend([str(fecha_inicio), str(fecha_fin)])
 
 where_sql = ""
 if where_clauses:
