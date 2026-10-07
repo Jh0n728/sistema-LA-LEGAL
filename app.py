@@ -245,3 +245,4 @@ with st.sidebar.expander("Modificar Registro"):
             st.rerun() # Recarga la app para ver el cambio reflejado inmediatamente
         except Exception as e:
             st.error(f"Error al actualizar: {e}")
+#subir a github y ya ta
