@@ -188,42 +188,101 @@ with st.container():
 
 # --- SECCIÓN: ACTUALIZAR REGISTROS DIARIOS EN LA BARRA LATERAL ---
 with st.sidebar.expander("Cargar Datos"):
-    st.markdown("### Actualizar Registros")
-    
-    db_para_actualizar = st.selectbox(
-        "Base de datos a actualizar",
-        ["db_cuenta_33", "db_cuenta_14"],
-        key="select_db_admin"
-    )
+  st.markdown("### Actualizar Registros")
 
-    archivo_subido = st.file_uploader(
-        "Subir nuevos depósitos (Excel/CSV)", 
-        type=["xlsx", "csv"],
-        key="uploader_admin"
-    )
+  db_para_actualizar = st.selectbox(
+      "Base de datos a actualizar",
+      ["db_cuenta_33", "db_cuenta_14"],
+      key="select_db_admin",
+  )
 
-    if archivo_subido is not None:
-        try:
-            if archivo_subido.name.endswith(".csv"):
-                df_nuevos = pd.read_csv(archivo_subido)
-            else:
-                df_nuevos = pd.read_excel(archivo_subido)
-            
-            if 'fecha' in df_nuevos.columns:
-                df_nuevos['fecha'] = pd.to_datetime(df_nuevos['fecha']).dt.strftime('%Y-%m-%d')
+  archivo_subido = st.file_uploader(
+      "Subir nuevos depósitos (Excel/CSV)", type=["xlsx", "csv"], key="uploader_admin"
+  )
 
-            st.write("Vista previa:")
-            st.dataframe(df_nuevos, use_container_width=True)
+  if archivo_subido is not None:
+    try:
+      if archivo_subido.name.endswith(".csv"):
+        df_nuevos = pd.read_csv(archivo_subido)
+      else:
+        df_nuevos = pd.read_excel(archivo_subido)
 
-            if st.button("Confirmar e Insertar", key="btn_confirmar_admin"):
-                try:
-                    engine_actualizacion = conectar_db(db_para_actualizar)
-                    df_nuevos.to_sql("pagos", con=engine_actualizacion, if_exists="append", index=False)
-                    st.success(f"¡{len(df_nuevos)} registros agregados a {db_para_actualizar}!")
-                except Exception as e:
-                    st.error(f"Error al insertar. Revisa las columnas. Detalle: {e}")
-        except Exception as e:
-            st.error(f"Error al leer el archivo: {e}")
+      # Normalizamos los nombres de las columnas del archivo subido a minúsculas
+      # para evitar errores si vienen con mayúsculas o espacios
+      df_nuevos.columns = [str(c).strip().lower() for c in df_nuevos.columns]
+
+      # Mapeo por si el Excel nuevo tiene nombres de columna diferentes a la BD
+      renombres = {
+          "nº deposito": "nro_deposito",
+          "n° deposito": "nro_deposito",
+          "nro deposito": "nro_deposito",
+          "nombre": "nombre",
+          "participante": "participante",
+          "monto": "monto",
+          "hoja de ruta": "hoja_de_ruta",
+          "descripcion": "programa_descripcion",
+          "mes declaracion": "mes_declaracion",
+          "obs": "obs",
+      }
+      df_nuevos = df_nuevos.rename(columns=renombres)
+
+      if "fecha" in df_nuevos.columns:
+        df_nuevos["fecha"] = pd.to_datetime(df_nuevos["fecha"]).dt.strftime(
+            "%Y-%m-%d"
+        )
+
+      # --- LÓGICA DE ANTIDUPLICADOS ---
+      engine_temp = conectar_db(db_para_actualizar)
+      with engine_temp.connect() as conn:
+        # Obtenemos los números de depósito que ya existen en la base de datos
+        df_existentes = pd.read_sql(
+            "SELECT DISTINCT nro_deposito FROM pagos", con=conn
+        )
+        depositos_existentes = set(
+            df_existentes["nro_deposito"].astype(str).str.strip()
+        )
+
+      # Filtramos el DataFrame nuevo para conservar solo los que NO están en la base de datos
+      if "nro_deposito" in df_nuevos.columns:
+        # Convertimos a string para asegurar una comparación limpia
+        mask_nuevos = ~df_nuevos["nro_deposito"].astype(str).str.strip().isin(
+            depositos_existentes
+        )
+        df_filtrado = df_nuevos[mask_nuevos].copy()
+        duplicados_omitidos = len(df_nuevos) - len(df_filtrado)
+      else:
+        df_filtrado = df_nuevos
+        duplicados_omitidos = 0
+
+      st.write("Vista previa de registros nuevos a insertar:")
+      st.dataframe(df_filtrado, use_container_width=True)
+
+      if duplicados_omitidos > 0:
+        st.info(
+            f"Se omitieron {duplicados_omitidos} registros porque ya"
+            " existían en la base de datos."
+        )
+
+      if len(df_filtrado) > 0:
+        if st.button("Confirmar e Insertar", key="btn_confirmar_admin"):
+          try:
+            df_filtrado.to_sql(
+                "pagos", con=engine_temp, if_exists="append", index=False
+            )
+            st.success(
+                f"¡{len(df_filtrado)} registros nuevos agregados exitosamente a"
+                f" {db_para_actualizar}!"
+            )
+            st.rerun()
+          except Exception as e:
+            st.error(f"Error al insertar. Revisa las columnas. Detalle: {e}")
+      else:
+        st.warning(
+            "Todos los registros del archivo subido ya existen en la base de datos. No hay nada nuevo que agregar."
+        )
+
+    except Exception as e:
+      st.error(f"Error al leer el archivo: {e}")
 
 # --- SECCIÓN: EDITAR MONTO DE UN DEPÓSITO ---
 with st.sidebar.expander("Modificar Registro"):
