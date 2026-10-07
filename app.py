@@ -83,6 +83,9 @@ try:
         
         cols_info = pd.read_sql(f"PRAGMA table_info({nombre_tabla});", con=conn)
         columnas_tabla = cols_info['name'].tolist() if not cols_info.empty else []
+        
+        # Obtener una pequeña muestra de los primeros registros para ver qué hay realmente en la BD
+        df_muestra = pd.read_sql(f"SELECT * FROM {nombre_tabla} LIMIT 3", con=conn)
     
     col_deposito_real = 'nro_deposito' if 'nro_deposito' in columnas_tabla else (columnas_tabla[1] if len(columnas_tabla) > 1 else 'nro_deposito')
 
@@ -92,13 +95,15 @@ except Exception as e:
     nombre_tabla = "pagos"
     columnas_tabla = []
     col_deposito_real = "nro_deposito"
+    df_muestra = pd.DataFrame()
     st.stop()
 
 # --- PANEL DE DIAGNOSTICO EN LA BARRA LATERAL ---
-with st.sidebar.expander("🔍 Diagnóstico de Base de Datos"):
+with st.sidebar.expander("🔍 Diagnóstico Avanzado de Datos"):
     st.write(f"**Base de datos:** {cuenta_seleccionada}")
     st.write(f"**Tabla:** `{nombre_tabla}`")
-    st.write(f"**Columna de depósito:** `{col_deposito_real}`")
+    st.write("**Primeros registros en bruto (Muestra de la BD):**")
+    st.dataframe(df_muestra, use_container_width=True)
 
 # Encabezado principal
 nombre_cuenta_visible = "Cuenta 33" if "33" in cuenta_seleccionada else "Cuenta 14"
@@ -182,7 +187,7 @@ if where_clauses:
 query_total = f"SELECT SUM(monto) as total_monto, COUNT(*) as total_registros FROM {nombre_tabla}" + where_sql if "monto" in columnas_tabla else f"SELECT 0 as total_monto, COUNT(*) as total_registros FROM {nombre_tabla}" + where_sql
 
 col_fecha_sel = "fecha" if "fecha" in columnas_tabla else "'' AS fecha"
-col_dep_sel = f"COALESCE(NULLIF(TRIM(CAST({col_deposito_real} AS TEXT)), ''), '-') AS nro_deposito" if col_deposito_real in columnas_tabla else "'' AS nro_deposito"
+col_dep_sel = f"{col_deposito_real} AS nro_deposito" if col_deposito_real in columnas_tabla else "'' AS nro_deposito"
 col_nom_sel = "nombre" if "nombre" in columnas_tabla else "'' AS nombre"
 col_part_sel = "participante" if "participante" in columnas_tabla else "'' AS participante"
 col_monto_sel = "monto" if "monto" in columnas_tabla else "0 AS monto"
@@ -213,8 +218,9 @@ with st.container():
             if total_registros > 0:
                 df = pd.read_sql(query_tabla, con=conn, params=tuple(params) if params else None)
                 
-                # Rellenar cualquier valor nulo restante en el DataFrame de Pandas
-                df['nro_deposito'] = df['nro_deposito'].fillna('-').replace('', '-')
+                # Reemplazar nulos o vacíos para visualizar claramente
+                df['nro_deposito'] = df['nro_deposito'].astype(str).str.strip()
+                df['nro_deposito'] = df['nro_deposito'].replace({'': '-', 'None': '-', 'nan': '-', 'None': '-'})
 
                 df = df.rename(columns={
                     "fecha": "Fecha",
@@ -268,28 +274,4 @@ with st.sidebar.expander("Cargar Datos"):
                 try:
                     engine_actualizacion = conectar_db(db_para_actualizar)
                     df_nuevos.to_sql(nombre_tabla, con=engine_actualizacion, if_exists="append", index=False)
-                    st.success(f"¡{len(df_nuevos)} registros agregados a {db_para_actualizar} ({nombre_tabla})!")
-                except Exception as e:
-                    st.error(f"Error al insertar. Revisa las columnas. Detalle: {e}")
-        except Exception as e:
-            st.error(f"Error al leer el archivo: {e}")
-
-# --- SECCIÓN: EDITAR MONTO DE UN DEPÓSITO ---
-with st.sidebar.expander("Modificar Registro"):
-    st.markdown("### Modificar Monto")
-    deposito_a_editar = st.text_input("N° de Depósito a corregir", placeholder="Ej: 15271987")
-    nuevo_monto = st.number_input("Nuevo Monto en Bs:", value=0.0, step=10.0)
-    
-    if st.button("Actualizar Monto", key="btn_editar_monto"):
-        try:
-            engine_edicion = conectar_db(cuenta_seleccionada)
-            with engine_edicion.connect() as conn:
-                trans = conn.begin()
-                query_update = text(f"UPDATE {nombre_tabla} SET monto = :monto WHERE {col_deposito_real} = :nro")
-                conn.execute(query_update, {"monto": nuevo_monto, "nro": deposito_a_editar})
-                trans.commit()
-            
-            st.success(f"¡Depósito {deposito_a_editar} actualizado a {nuevo_monto} Bs!")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error al actualizar: {e}")
+                    st.success(f"¡{len(df_nuevos)} registros agregados a {db_para_actualizar} ({nombre_
