@@ -218,12 +218,20 @@ with st.sidebar.expander("Cargar Datos"):
         key="uploader_admin"
     )
 
-    if archivo_subido is not None:
+if archivo_subido is not None:
         try:
             if archivo_subido.name.endswith(".csv"):
                 df_nuevos = pd.read_csv(archivo_subido)
             else:
                 df_nuevos = pd.read_excel(archivo_subido)
+            
+            # --- AÑADE ESTO PARA LIMPIAR LA HORA DE LA FECHA ---
+            if 'fecha' in df_nuevos.columns:
+                df_nuevos['fecha'] = pd.to_datetime(df_nuevos['fecha']).dt.strftime('%Y-%m-%d')
+            # --------------------------------------------------
+
+            st.write("Vista previa:")
+            st.dataframe(df_nuevos, use_container_width=True)
             
             st.write("Vista previa:")
             st.dataframe(df_nuevos, use_container_width=True)
