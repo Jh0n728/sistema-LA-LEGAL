@@ -4,6 +4,8 @@ import streamlit as st
 import pandas as pd
 from sqlalchemy import create_engine, text
 from sqlalchemy.pool import NullPool
+from busqueda import asegurar_busqueda, limpiar
+from resaltar import SQL_REQUIERE_HOJA, TEXTO_CONTROL, marcar_pendientes, resaltar
 
 # Configuración de la página (DEBE SER LO PRIMERO)
 st.set_page_config(page_title="Sistema de Revisión de Pagos", layout="wide")
@@ -15,16 +17,21 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 @st.cache_resource
 def conectar_db(db_name):
     db_path = os.path.join(BASE_DIR, f"{db_name}.db")
-    return create_engine(
+    engine = create_engine(
         f"sqlite:///{db_path}",
         connect_args={"check_same_thread": False},
         poolclass=NullPool
     )
+    asegurar_busqueda(engine)  # prepara la búsqueda sin tildes (la primera vez tarda unos segundos)
+    return engine
 
 # --- CREDENCIALES DE ACCESO ---
-USUARIOS_PERMITIDOS = {
-    "TilinTolon": "TILINTOLON2026",
-}
+# Las credenciales ya no van en el código: se leen de .streamlit/secrets.toml
+try:
+    USUARIOS_PERMITIDOS = dict(st.secrets["usuarios"])
+except Exception:
+    USUARIOS_PERMITIDOS = {}
+    st.error("Falta configurar los usuarios en .streamlit/secrets.toml (ver instrucciones).")
 
 # Inicializar estado de sesión para el Login
 if "autenticado" not in st.session_state:
@@ -62,6 +69,12 @@ if not st.session_state.autenticado:
 st.sidebar.title(f"Usuario: {st.session_state.usuario}")
 st.sidebar.markdown("---")
 
+modo = st.sidebar.radio("Modo", ["Consulta de pagos", "Verificar kardex"])
+if modo == "Verificar kardex":
+    from kardex import pantalla_verificar
+    pantalla_verificar(conectar_db)
+    st.stop()
+
 cuenta_seleccionada = st.sidebar.selectbox(
     "Seleccione la Cuenta a Revisar:",
     ["db_cuenta_33", "db_cuenta_14"]
@@ -92,7 +105,7 @@ col_busq, col_monto, col_fecha = st.columns(3)
 with col_busq:
     busqueda = st.text_input("Escriba el Nombre o N° de Depósito (Presione Enter):", placeholder="Ej: Juan Pérez o 15271987")
     st.markdown("**Filtro Especial de Control:**")
-    solo_sin_hoja = st.checkbox("Mostrar SOLO depósitos SIN Hoja de Ruta")
+    solo_sin_hoja = st.checkbox("Mostrar SOLO depósitos que necesitan Hoja de Ruta y aún no la tienen")
     
 with col_monto:
     st.markdown("**Filtrar por Monto:**")
@@ -140,16 +153,16 @@ st.markdown("---")
 where_clauses = []
 params = []
 
-if busqueda.strip():
-    palabras = busqueda.strip().split()
+palabras = limpiar(busqueda).split()  # sin tildes ni mayúsculas
+if palabras:
     condiciones_palabras = []
     for p in palabras:
-        condiciones_palabras.append("(nombre LIKE ? OR nro_deposito LIKE ? OR participante LIKE ?)")
-        params.extend([f"%{p}%", f"%{p}%", f"%{p}%"])
+        condiciones_palabras.append("(busqueda LIKE ? OR nro_deposito LIKE ?)")
+        params.extend([f"%{p}%", f"%{p}%"])
     where_clauses.append("(" + " AND ".join(condiciones_palabras) + ")")
 
 if solo_sin_hoja:
-    where_clauses.append("(hoja_de_ruta IS NULL OR TRIM(hoja_de_ruta) = '' OR LOWER(TRIM(hoja_de_ruta)) = 'none')")
+    where_clauses.append(SQL_REQUIERE_HOJA)  # no cuenta pagos CPT ni con nombre en Participante
 
 # Aplicar según la opción de monto seleccionada
 if tipo_filtro_monto == "Monto Exacto" and monto_buscado > 0:
@@ -171,6 +184,8 @@ if where_clauses:
 # Consultas SQL dinámicas para totales y tabla
 query_total = f"SELECT COUNT(*) AS total_registros, SUM(monto) AS total_monto FROM pagos {where_sql}"
 query_tabla = f"SELECT * FROM pagos {where_sql} LIMIT 500"
+where_pend = (where_sql + " AND " if where_sql else "WHERE ") + SQL_REQUIERE_HOJA
+query_pend = f"SELECT COUNT(*) FROM pagos {where_pend}"
 
 # --- BLOQUE FIJO DE RENDERIZADO ---
 with st.container():
@@ -180,18 +195,26 @@ with st.container():
             total_registros = int(df_totales["total_registros"].iloc[0]) if not df_totales.empty and pd.notna(df_totales["total_registros"].iloc[0]) else 0
             monto_global = float(df_totales["total_monto"].iloc[0]) if not df_totales.empty and pd.notna(df_totales["total_monto"].iloc[0]) else 0.0
 
-            c1, c2 = st.columns(2)
+            df_pend = pd.read_sql(query_pend, con=conn, params=tuple(params) if params else None)
+            total_pend = int(df_pend.iloc[0, 0])
+
+            c1, c2, c3 = st.columns(3)
             with c1:
                 st.metric(label="Monto Total General Acumulado", value=f"{monto_global:,.2f} Bs")
             with c2:
                 texto_registros = f"{total_registros:,} (Mostrando primeros 500)" if total_registros > 500 else f"{total_registros:,}"
                 st.metric(label="Registros Coincidentes", value=texto_registros)
+            with c3:
+                st.metric(label="📄 Faltan Hoja de Ruta", value=f"{total_pend:,}")
 
             st.markdown("#### Detalle de Transacciones")
 
             if total_registros > 0:
                 df = pd.read_sql(query_tabla, con=conn, params=tuple(params) if params else None)
                 
+                df = df.drop(columns=["busqueda"], errors="ignore")
+                mask_pend = marcar_pendientes(df)
+                df.insert(0, "Control", mask_pend.map({True: TEXTO_CONTROL, False: ""}))
                 df = df.rename(columns={
                     "fecha": "Fecha",
                     "nro_deposito": "N° Depósito",
@@ -204,7 +227,7 @@ with st.container():
                     "obs": "Observaciones"
                 })
 
-                st.dataframe(df, use_container_width=True, height=500)
+                st.dataframe(resaltar(df, mask_pend), use_container_width=True, height=500)
             else:
                 st.info("No hay transacciones registradas o ningún elemento coincide con el filtro aplicado.")
                 
@@ -232,48 +255,26 @@ with st.sidebar.expander("Cargar Datos"):
       else:
         df_nuevos = pd.read_excel(archivo_subido)
 
-      # Normalizamos los nombres de las columnas del archivo subido a minúsculas
-      df_nuevos.columns = [str(c).strip().lower() for c in df_nuevos.columns]
+      # --- PREPARAR ARCHIVO Y ANTIDUPLICADOS (N° de depósito + fecha + monto) ---
+      from cargar import preparar_y_filtrar
 
-      # Mapeo por si el Excel nuevo tiene nombres de columna diferentes a la BD
-      renombres = {
-          "nº deposito": "nro_deposito",
-          "n° deposito": "nro_deposito",
-          "nro deposito": "nro_deposito",
-          "nombre": "nombre",
-          "participante": "participante",
-          "monto": "monto",
-          "hoja de ruta": "hoja_de_ruta",
-          "descripcion": "programa_descripcion",
-          "mes declaracion": "mes_declaracion",
-          "obs": "obs",
-      }
-      df_nuevos = df_nuevos.rename(columns=renombres)
-
-      if "fecha" in df_nuevos.columns:
-        df_nuevos["fecha"] = pd.to_datetime(df_nuevos["fecha"]).dt.strftime(
-            "%Y-%m-%d"
-        )
-
-      # --- LÓGICA DE ANTIDUPLICADOS ---
       engine_temp = conectar_db(db_para_actualizar)
-      with engine_temp.connect() as conn:
-        df_existentes = pd.read_sql(
-            "SELECT DISTINCT nro_deposito FROM pagos", con=conn
+      df_filtrado, duplicados_omitidos, mismo_nro, ignoradas = preparar_y_filtrar(
+          engine_temp, df_nuevos
+      )
+      if ignoradas:
+        st.caption(
+            "Columnas del archivo que no existen en la base y se ignoran: "
+            + ", ".join(ignoradas)
         )
-        depositos_existentes = set(
-            df_existentes["nro_deposito"].astype(str).str.strip()
+      if mismo_nro.any():
+        st.warning(
+            f"{int(mismo_nro.sum())} registro(s) tienen un N° de depósito que ya existe"
+            " en la base pero con otra fecha o monto. Revísalos antes de insertar."
         )
-
-      if "nro_deposito" in df_nuevos.columns:
-        mask_nuevos = ~df_nuevos["nro_deposito"].astype(str).str.strip().isin(
-            depositos_existentes
-        )
-        df_filtrado = df_nuevos[mask_nuevos].copy()
-        duplicados_omitidos = len(df_nuevos) - len(df_filtrado)
-      else:
-        df_filtrado = df_nuevos
-        duplicados_omitidos = 0
+        st.dataframe(df_filtrado[mismo_nro], use_container_width=True)
+        if st.checkbox("No insertar esos registros (los reviso aparte)", key="chk_mismo_nro"):
+          df_filtrado = df_filtrado[~mismo_nro]
 
       st.write("Vista previa de registros nuevos a insertar:")
       st.dataframe(df_filtrado, use_container_width=True)
@@ -281,7 +282,7 @@ with st.sidebar.expander("Cargar Datos"):
       if duplicados_omitidos > 0:
         st.info(
             f"Se omitieron {duplicados_omitidos} registros porque ya"
-            " existían en la base de datos."
+            " existían en la base de datos o estaban repetidos en el archivo."
         )
 
       if len(df_filtrado) > 0:
@@ -290,6 +291,7 @@ with st.sidebar.expander("Cargar Datos"):
             df_filtrado.to_sql(
                 "pagos", con=engine_temp, if_exists="append", index=False
             )
+            asegurar_busqueda(engine_temp)
             st.success(
                 f"¡{len(df_filtrado)} registros nuevos agregados exitosamente a"
                 f" {db_para_actualizar}!"

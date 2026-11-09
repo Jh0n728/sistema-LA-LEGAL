@@ -1,4 +1,7 @@
-streamlit
-pandas
-SQLAlchemy
-openpyxl
+   streamlit
+   pandas
+   sqlalchemy
+   openpyxl
+   pdfplumber
+   pytesseract
+   pillow
