@@ -15,6 +15,7 @@ ALIAS = {
     "HOJA DE RUTA": "hoja_de_ruta",
     "DESCRIPCION": "programa_descripcion", "PROGRAMA DESCRIPCION": "programa_descripcion",
     "MES DECLARACION": "mes_declaracion",
+    "FECHA DE CANJE": "fecha_canje",
     "OBS": "obs", "OBSERVACION": "obs", "OBSERVACIONES": "obs",
 }
 

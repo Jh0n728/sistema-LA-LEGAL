@@ -224,6 +224,7 @@ with st.container():
                     "hoja_de_ruta": "Hoja de Ruta",
                     "programa_descripcion": "Descripción",
                     "mes_declaracion": "Mes Declaración",
+                    "fecha_canje": "Fecha de Canje",
                     "obs": "Observaciones"
                 })
 
