@@ -21,6 +21,8 @@ def asegurar_busqueda(engine):
     """Crea la columna si falta y completa los registros que no la tienen. Devuelve cuántos completó."""
     with engine.begin() as con:
         cols = [r[1] for r in con.exec_driver_sql("PRAGMA table_info(pagos)").fetchall()]
+        if not cols:  # la base no tiene tabla pagos (por ejemplo db_cpt)
+            return 0
         if "busqueda" not in cols:
             con.exec_driver_sql("ALTER TABLE pagos ADD COLUMN busqueda TEXT")
         pendientes = con.exec_driver_sql(

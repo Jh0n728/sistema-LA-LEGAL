@@ -11,6 +11,7 @@ from busqueda import limpiar
 from resaltar import TEXTO_CONTROL, requiere_hoja, resaltar
 
 CUENTAS = {"Cuenta 33 (cuotas)": "db_cuenta_33", "Cuenta 14 (valores)": "db_cuenta_14"}
+RUTA_CPT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "db_cpt.db")
 COLS = ["Participante", "Cédula", "Programa", "N° Depósito", "Fecha", "Monto"]
 
 # "93126452 18/06/2024 150"  (el N° de fila del kardex se ignora solo)
@@ -121,8 +122,48 @@ def _indices(eng):
         pass
 
 
-def verificar(motores, kardex, progreso=None):
-    """motores: {nombre de cuenta: engine}. Devuelve un DataFrame con el estado de cada pago."""
+def _coincide(f, fecha_iso, monto):
+    m = pd.to_numeric(_v(f, "monto"), errors="coerce")
+    return str(_v(f, "fecha"))[:10] == fecha_iso and not pd.isna(m) and abs(m - monto) < 0.01
+
+
+def _buscar_nro(motores, nro):
+    out = []
+    for cuenta, eng in motores.items():
+        with eng.connect() as con:
+            df = pd.read_sql("SELECT * FROM pagos WHERE nro_deposito = ? OR nro_deposito = ?",
+                             con=con, params=(nro, nro + ".0"))
+        out += [(cuenta, f) for _, f in df.iterrows()]
+    return out
+
+
+def _buscar_cpt(eng, nro):
+    """Filas de la base de pagos en línea donde el N° es código de seguimiento o de transacción."""
+    try:
+        with eng.connect() as con:
+            df = pd.read_sql("SELECT * FROM cpt WHERE codigo_seguimiento = ? OR codigo_transaccion = ?",
+                             con=con, params=(nro, nro))
+        return [f for _, f in df.iterrows()]
+    except Exception:
+        return []
+
+
+def _parecidos(motores, nro, fecha_iso, dia_sig, monto):
+    out = []
+    for cuenta, eng in motores.items():
+        with eng.connect() as con:
+            cand = pd.read_sql("SELECT * FROM pagos WHERE fecha >= ? AND fecha < ? AND monto = ?",
+                               con=con, params=(fecha_iso, dia_sig, monto))
+        for _, f in cand.iterrows():
+            otro = re.sub(r"\.0$", "", str(f["nro_deposito"]).strip())
+            if SequenceMatcher(None, otro, nro).ratio() >= 0.8:
+                out.append((cuenta, f, otro))
+    return out
+
+
+def verificar(motores, kardex, progreso=None, cpt=None):
+    """motores: {nombre de cuenta: engine}. cpt: engine de la base de pagos en línea (opcional), que
+    permite traducir códigos de seguimiento (kardex antiguos) a códigos de transacción (los de las bases)."""
     for eng in motores.values():
         _indices(eng)
     out, total = [], max(len(kardex), 1)
@@ -135,48 +176,58 @@ def verificar(motores, kardex, progreso=None):
         dia_sig = None if pd.isna(d) else (d + pd.Timedelta(days=1)).strftime("%Y-%m-%d")
         monto = float(r["Monto"])
 
-        hallados, parecidos = [], []
-        for cuenta, eng in motores.items():
-            with eng.connect() as con:
-                df = pd.read_sql("SELECT * FROM pagos WHERE nro_deposito = ? OR nro_deposito = ?",
-                                 con=con, params=(nro, nro + ".0"))
-                hallados += [(cuenta, f) for _, f in df.iterrows()]
-                if df.empty and fecha_iso:
-                    cand = pd.read_sql("SELECT * FROM pagos WHERE fecha >= ? AND fecha < ? AND monto = ?",
-                                       con=con, params=(fecha_iso, dia_sig, monto))
-                    for _, f in cand.iterrows():
-                        otro = re.sub(r"\.0$", "", str(f["nro_deposito"]).strip())
-                        if SequenceMatcher(None, otro, nro).ratio() >= 0.8:
-                            parecidos.append((cuenta, f, otro))
+        hallados = _buscar_nro(motores, nro)
+        exactos = [h for h in hallados if _coincide(h[1], fecha_iso, monto)]
+        nro_base, traduccion, cpt_rows = nro, "", []
+        if cpt is not None and not exactos:
+            cpt_rows = _buscar_cpt(cpt, nro)
+            for c in cpt_rows:
+                t = re.sub(r"\D", "", str(_v(c, "codigo_transaccion")))
+                if not t or t == nro:
+                    continue
+                h2 = _buscar_nro(motores, t)
+                if not h2:
+                    continue
+                ex2 = [h for h in h2 if _coincide(h[1], fecha_iso, monto)]
+                if ex2 or not hallados:
+                    hallados, exactos, nro_base = h2, ex2, t
+                    traduccion = f"Código de seguimiento {nro} → transacción {t}"
+                    if ex2:
+                        break
 
-        exactos = [h for h in hallados
-                   if str(_v(h[1], "fecha"))[:10] == fecha_iso
-                   and abs(pd.to_numeric(_v(h[1], "monto"), errors="coerce") - monto) < 0.01]
-        nota = ""
+        antes = traduccion + " · " if traduccion else ""
+        nota = traduccion
         if exactos:
             estado, (cuenta, f) = "✅ Encontrado", exactos[0]
             if len(exactos) > 1:
-                nota = f"Aparece {len(exactos)} veces en las bases"
+                nota = antes + f"Aparece {len(exactos)} veces en las bases"
         elif hallados:
             estado, (cuenta, f) = "⚠️ Revisar", hallados[0]
             dif = []
             if str(_v(f, "fecha"))[:10] != fecha_iso:
                 dif.append(f"fecha en base: {str(_v(f, 'fecha'))[:10]}")
-            if abs(pd.to_numeric(_v(f, "monto"), errors="coerce") - monto) >= 0.01:
+            if not _coincide(f, str(_v(f, "fecha"))[:10], monto):
                 dif.append(f"monto en base: {_v(f, 'monto')}")
-            nota = "Coincide el N° pero difiere " + " / ".join(dif)
-        elif parecidos:
-            estado, (cuenta, f, otro) = "⚠️ Revisar", parecidos[0]
-            nota = f"No existe ese N°; hay uno parecido con misma fecha y monto: {otro}"
+            nota = antes + "Coincide el N° pero difiere " + " / ".join(dif)
+        elif cpt_rows:
+            estado, cuenta, f = "⚠️ Revisar", "Pagos CPT", cpt_rows[0]
+            nota = (f"Existe en pagos en línea (transacción {_v(f, 'codigo_transaccion')}, "
+                    f"{str(_v(f, 'fecha'))[:10]}, {_v(f, 'monto')} Bs) pero no está en las cuentas")
         else:
-            estado, cuenta, f, nota = "❌ No encontrado", "", pd.Series(dtype=object), ""
+            parecidos = _parecidos(motores, nro, fecha_iso, dia_sig, monto) if fecha_iso else []
+            if parecidos:
+                estado, (cuenta, f, otro) = "⚠️ Revisar", parecidos[0]
+                nota = f"No existe ese N°; hay uno parecido con misma fecha y monto: {otro}"
+            else:
+                estado, cuenta, f, nota = "❌ No encontrado", "", pd.Series(dtype=object), ""
 
-        control = TEXTO_CONTROL if (not estado.startswith("❌") and requiere_hoja(
+        control = TEXTO_CONTROL if (not estado.startswith("❌") and cuenta != "Pagos CPT" and requiere_hoja(
             _v(f, "hoja_de_ruta"), _v(f, "nombre"), _v(f, "participante"))) else ""
         out.append({
             "Estado": estado, "Control": control,
             "Participante (kardex)": _v(r, "Participante"),
-            "N° Depósito": nro, "Fecha": r["Fecha"], "Monto": monto,
+            "N° Depósito": nro, "N° en base": nro_base if cuenta else "",
+            "Fecha": r["Fecha"], "Monto": monto,
             "Cuenta": cuenta, "Nombre": _v(f, "nombre"), "Participante": _v(f, "participante"),
             "Hoja de Ruta": _v(f, "hoja_de_ruta"), "Descripción": _v(f, "programa_descripcion"),
             "Mes Declaración": _v(f, "mes_declaracion"), "Obs.": _v(f, "obs"), "Nota": nota,
@@ -284,10 +335,14 @@ def pantalla_verificar(conectar_db):
                            key=f"ed_{hash(texto)}_{hash(tuple(mask.tolist()))}")
     vista = vista.dropna(subset=["N° Depósito", "Fecha", "Monto"]).fillna({"Participante": ""})
 
+    cpt = conectar_db("db_cpt") if os.path.exists(RUTA_CPT) else None
+    if cpt is None:
+        st.caption("ℹ️ No hay base de pagos en línea (db_cpt.db): los códigos de seguimiento antiguos no se traducirán.")
+
     if st.button(f"Verificar estos {len(vista)} pagos", type="primary", disabled=vista.empty):
         barra = st.progress(0.0, text="Verificando...")
         res = verificar({n: conectar_db(db) for n, db in CUENTAS.items()}, vista,
-                        progreso=lambda p: barra.progress(p, text="Verificando..."))
+                        progreso=lambda p: barra.progress(p, text="Verificando..."), cpt=cpt)
         barra.empty()
         st.session_state["resultado_kardex"] = (hash(texto), res)
 
